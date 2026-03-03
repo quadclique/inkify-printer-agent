@@ -6,6 +6,37 @@ __pycache__/
 # C extensions
 *.so
 
+# Environments
+.env
+.env.*
+.envrc
+.venv
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Runtime & Agent Generated
+runtime/
+logs/
+*.log
+*.db
+*.sqlite3
+*.sqlite
+*.db-journal
+*.lock
+*.pid
+
+# Secrets & Certificates
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+*.der
+
 # Distribution / packaging
 .Python
 build/
@@ -26,17 +57,7 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
-
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
-
-# Unit test / coverage reports
+# Testing & Coverage
 htmlcov/
 .tox/
 .nox/
@@ -47,9 +68,28 @@ nosetests.xml
 coverage.xml
 *.cover
 *.py.cover
-.hypothesis/
 .pytest_cache/
+.hypothesis/
 cover/
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Printer Agent Specific
+config/local_*.json
+config/*.secret.json
+
+# PyInstaller
+#  Usually these files are written by a python script from a template
+#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
 
 # Translations
 *.mo
@@ -134,15 +174,6 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
-# Environments
-.env
-.envrc
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
 
 # Spyder project settings
 .spyderproject
@@ -173,9 +204,9 @@ cython_debug/
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
+.idea/
 
-# Abstra
+Abstra
 # Abstra is an AI-powered process automation framework.
 # Ignore directories containing user credentials, local state, and settings.
 # Learn more at https://abstra.io/docs
@@ -186,7 +217,7 @@ cython_debug/
 #  that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
 #  and can be added to the global gitignore or merged into this file. However, if you prefer, 
 #  you could uncomment the following to ignore the entire vscode folder
-# .vscode/
+.vscode/
 
 # Ruff stuff:
 .ruff_cache/
@@ -194,7 +225,7 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-# Cursor
+Cursor
 #  Cursor is an AI-powered code editor. `.cursorignore` specifies files/directories to
 #  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data
 #  refer to https://docs.cursor.com/context/ignore-files

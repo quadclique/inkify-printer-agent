@@ -1,0 +1,28 @@
+[Unit]
+Description=Inkify Printer Agent Service
+# Ensure we don't start until the internet and the OS printer service are up
+After=network.target network-online.target cups.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{USER}}
+Group={{GROUP}}
+WorkingDirectory={{WORKING_DIR}}
+
+# Ensure the virtual environment is in the PATH
+Environment="PATH={{WORKING_DIR}}/.venv/bin:/usr/bin:/usr/local/bin"
+
+# Start the application using the Python binary inside the virtual environment
+ExecStart={{WORKING_DIR}}/.venv/bin/python app/main.py
+
+# Resilience: If the agent crashes (e.g., out of memory), wait 10 seconds and restart it
+Restart=always
+RestartSec=10
+
+# Allow systemd to cleanly terminate the main process and its children
+KillMode=mixed
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

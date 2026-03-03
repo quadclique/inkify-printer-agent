@@ -1,0 +1,9 @@
+# requirements.txt
+python-dotenv      # For loading .env files
+requests           # For making API calls
+psutil             # For gathering system metrics
+PyYAML             # For parsing .yaml config files
+
+# Development & Testing (Optional in Production)
+pytest
+pytest-mock
