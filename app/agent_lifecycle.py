@@ -1,6 +1,6 @@
+import sys
 import time
 import logging
-import sys
 from app.core.config import config
 from app.services.api_client_service import APIClientService
 from app.services.job_service import JobService
@@ -9,42 +9,44 @@ from app.services.heartbeat_service import HeartbeatService
 from app.services.cleanup_service import CleanupService
 from app.services.updater_service import UpdaterService
 from app.services.pairing_service import PairingService
+from app.services.printer_service import PrinterService
 
 logger = logging.getLogger(__name__)
 
 
 class PrinterAgent:
-    """
-    The main infinite loop for the Inkify Printer Agent.
-    Coordinates polling intervals, gracefully handles shutdowns, and delegates work.
-    """
 
     def __init__(self):
         self.is_running = False
 
         # Inject the shared API Client
         self.api_client = APIClientService()
-
         self.pairing_service = PairingService(self.api_client)
-        self.job_service = JobService()
-        self.heartbeat_service = HeartbeatService()
+        self.job_service = JobService(self.api_client)
+        self.heartbeat_service = HeartbeatService(self.api_client)
+        
         self.queue_manager_service = QueueManagerService()
         self.cleanup_service = CleanupService(retention_days=7)
         self.last_cleanup_time = 0
         self.updater_service = UpdaterService()
 
-    def run(self) -> None:
-        """Starts the agent's main blocking loop."""
+    def run(self, registration_token: str = None) -> None:
         logger.info(f"Starting {config.APP_NAME} in {config.ENVIRONMENT} mode...")
 
-        # --- BLOCKING SETUP PHASE ---
-        # The agent cannot proceed until it has a permanent cloud identity.
-        is_paired = False
-        while not is_paired:
-            is_paired = self.pairing_service.ensure_paired()
-            if not is_paired:
-                logger.critical("Failed to pair with Inkify Cloud. Agent will try again down.")
-        # --- OPERATIONAL PHASE ---
+        # --- 1. SETUP & AUTHENTICATION PHASE ---
+        is_paired = self.pairing_service.ensure_paired(registration_token)
+        if not is_paired:
+            logger.critical(
+                "Agent is not authenticated. Please run the agent with: python app/main.py --token <your_token>"
+            )
+            sys.exit(1)
+        logger.info("Agent successfully authenticated.")
+
+        # --- 2. HARDWARE SYNC PHASE ---
+        logger.info("Syncing local printers with Inkify Cloud...")
+        PrinterService().sync_printers_with_cloud(self.api_client)
+
+        # --- 3. OPERATIONAL PHASE ---
         self.is_running = True
         logger.info(
             f"Agent successfully authenticated. Polling for jobs every {config.JOB_POLL_INTERVAL} seconds."
@@ -52,7 +54,7 @@ class PrinterAgent:
 
         # Resolve any jobs interrupted by a crash/power-outage
         self.job_service.recover_interrupted_jobs()
-        
+
         # Start background threads
         self.heartbeat_service.start()
 

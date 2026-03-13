@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Dict
 
+
 @dataclass
 class AgentModel:
     """Represents the agent's core configuration and identity."""
@@ -8,7 +9,7 @@ class AgentModel:
     agent_id: str = ""
     agent_token: str = ""
     location: str = "unassigned"
-    default_printer: str = ""
+    printer_map: Dict[str, str] = field(default_factory=dict)
     features_enabled: Dict[str, bool] = field(default_factory=dict)
 
     @classmethod
@@ -17,7 +18,7 @@ class AgentModel:
             agent_id=data.get("agent_id", ""),
             agent_token=data.get("agent_token", ""),
             location=data.get("location", "unassigned"),
-            default_printer=data.get("default_printer", ""),
+            printer_map=data.get("printer_map", {}),
             features_enabled=data.get("features", {}),
         )
 
@@ -27,6 +28,6 @@ class AgentModel:
             "agent_id": self.agent_id,
             "agent_token": self.agent_token,
             "location": self.location,
-            "default_printer": self.default_printer,
+            "printer_map": self.printer_map,
             "features": self.features_enabled,
         }

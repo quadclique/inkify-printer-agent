@@ -40,6 +40,8 @@ class CUPSManager:
                             status = "printing"
                         else:
                             status = "offline"
+                        
+                        caps = self.get_printer_capabilities(printer_name)
 
                         printers.append(
                             {
@@ -47,6 +49,8 @@ class CUPSManager:
                                 "name": printer_name,
                                 "status": status,
                                 "raw_status": status_str,
+                                "supports_color": caps["supports_color"],
+                                "supports_duplex": caps["supports_duplex"],
                             }
                         )
             return printers
@@ -57,7 +61,28 @@ class CUPSManager:
         except subprocess.CalledProcessError as e:
             logger.error(f"Failed to query printers: {e.stderr}")
             return []
+        
+    def get_printer_capabilities(self, printer_name: str) -> Dict[str, bool]:
+        try:
+            result = subprocess.run(
+                ["lpoptions", "-p", printer_name, "-l"],
+                capture_output=True,
+                text=True,
+            )
 
+            output = result.stdout.lower()
+
+            return {
+                "supports_color": "color" in output,
+                "supports_duplex": "duplex" in output,
+            }
+
+        except Exception:
+            return {
+                "supports_color": False,
+                "supports_duplex": False,
+            }
+            
     def wait_for_job_completion(self, os_job_id: str, timeout: int = 300) -> bool:
         start_time = time.time()
         while time.time() - start_time < timeout:
@@ -138,3 +163,18 @@ class CUPSManager:
                 f"OS failed to print file {file_path} to {printer_name}. Error: {e.stderr}"
             )
             return None
+
+    def clear_queue(self, printer_name: str) -> bool:
+        """
+        Cancels all pending jobs in the CUPS queue for the specified printer.
+        Useful for flushing expired setup codes or stuck jobs.
+        """
+        try:
+            # 'cancel -a <printer>' clears all jobs for that destination
+            subprocess.run(["cancel", "-a", printer_name], check=True, capture_output=True)
+            logger.info(f"Successfully cleared print queue for {printer_name}.")
+            return True
+        except subprocess.CalledProcessError as e:
+            # This often triggers simply because the queue is already empty, which is fine.
+            logger.debug(f"Queue clear skipped or failed for {printer_name} (Queue might already be empty).")
+            return False

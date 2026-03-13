@@ -1,5 +1,7 @@
 import logging
 import requests
+from requests.structures import CaseInsensitiveDict
+from requests.adapters import HTTPAdapter
 from typing import Dict, Any, Optional, List
 from app.core.config import config
 from app.utils.retry_utils import with_retries
@@ -17,9 +19,17 @@ class APIClientService:
 
         # Pull token from YAML file instead of just env
         agent_config = AgentRepository().get_config()
+        self.agent_id = agent_config.agent_id
+
         self.token = agent_config.agent_token or config.AGENT_TOKEN
 
         self.session = requests.Session()
+        
+        # Increase connection pool size for multithreading
+        adapter = HTTPAdapter(pool_connections=10, pool_maxsize=10)
+        self.session.mount('http://', adapter)
+        self.session.mount('https://', adapter)
+        
         self._set_session_headers()
 
     def _set_session_headers(self):
@@ -27,10 +37,11 @@ class APIClientService:
         headers = {
             "Content-Type": "application/json",
             "User-Agent": f"{config.APP_NAME}/{config.APP_VERSION}",
+            "Connection": "close"
         }
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
-        self.session.headers.update(headers)
+        self.session.headers = CaseInsensitiveDict(headers)
 
     def update_credentials(self, token: str):
         """Called by PairingService once a permanent UUID is acquired."""
@@ -38,88 +49,52 @@ class APIClientService:
         self._set_session_headers()
         logger.info("API Client credentials securely updated in memory.")
 
-    # --- SETUP & ONBOARDING ENDPOINTS (Unauthenticated) ---
-
-    def initiate_setup(self) -> Optional[Dict[str, Any]]:
-        """Asks the cloud for a temporary 4-digit pairing code."""
-        try:
-            # Define the payload you want to send
-            payload = {"hardware_id": get_hardware_id()}
-
-            # Pass the payload into the 'json' parameter of the POST request
-            res = requests.post(
-                f"{self.base_url}/agent/setup/initiate",
-                json=payload, 
-                timeout=10,
-            )
-            res.raise_for_status()
-
-            # Call .json() without arguments to get the response from the server
-            return res.json()
-
-        except Exception as e:
-            logger.error(f"Failed to initiate setup: {e}")
-            return None
-
-    def check_setup_status(self, setup_code: str) -> Optional[Dict[str, Any]]:
-        """Polls to see if the human has typed the 4-digit code into the dashboard."""
-        try:
-            res = requests.get(
-                f"{self.base_url}/agent/setup/status/{setup_code}", timeout=10
-            )
-            res.raise_for_status()
-            return res.json()
-        except Exception as e:
-            logger.debug(f"Setup status check failed or pending: {e}")
-            return None
-
-    @with_retries(
-        max_retries=config.API_MAX_RETRIES,
-        exceptions=(requests.exceptions.ConnectionError, requests.exceptions.Timeout),
-    )
-    def _request(
-        self, method: str, endpoint: str, **kwargs
+    def register_agent(
+        self, registration_token: str, device_name: str
     ) -> Optional[Dict[str, Any]]:
-        """Internal helper to execute requests and catch standard errors."""
-        url = f"{self.base_url}/{endpoint.lstrip('/')}"
-
-        req_kwargs = {"timeout": config.API_TIMEOUT_DEFAULT}
-        req_kwargs.update(kwargs)
-
+        """Exchanges a dashboard registration token for a permanent agent secret."""
         try:
-            response = self.session.request(method, url, **kwargs)
-            response.raise_for_status()
+            payload = {
+                "registration_token": registration_token,
+                "device_name": device_name,
+                "hardware_id": get_hardware_id(),
+            }
+            res = requests.post(
+                f"{self.base_url}/agent/register", json=payload, timeout=15
+            )
+            res.raise_for_status()
 
-            # Return JSON if content exists, else an empty dict for 204 No Content
-            return response.json() if response.content else {}
+            data = res.json()
 
+            combined_token = f"{data['agent_uuid']}:{data['agent_secret']}"
+
+            self.update_credentials(combined_token)
+
+            return data
         except requests.exceptions.HTTPError as e:
             logger.error(
-                f"HTTP Error [{response.status_code}] on {url}: {response.text}"
+                f"Registration failed [{e.response.status_code}]: {e.response.text}"
             )
-        except requests.exceptions.ConnectionError:
-            logger.error(
-                f"Connection Error: Could not reach {self.base_url}. Are we offline?"
-            )
-        except requests.exceptions.Timeout:
-            logger.error(f"Timeout Error: The request to {url} took too long.")
+            return None
         except Exception as e:
-            logger.error(f"Unexpected API error: {e}")
+            logger.error(f"Failed to connect to registration server: {e}")
+            return None
 
-        return None
+    def sync_printers(self, printers: List[Dict]) -> Optional[Dict]:
+        """POST /agent/{agent_id}/printers/sync"""
+        return self._request(
+            "POST", f"/agent/printers/sync", json={"printers": printers}
+        )
 
     def check_in(self, agent_status: Dict[str, Any]) -> bool:
         """Sends the periodic heartbeat to let the backend know the agent is alive."""
-        printer_id = config.PRINTER_ID
-        response = self._request(
-            "POST", f"/agent/{printer_id}/connect", json=agent_status
-        )
+        response = self._request("POST", f"/agent/heartbeat", json=agent_status)
         return response is not None
 
     def fetch_pending_jobs(self) -> List[Dict[str, Any]]:
         """Polls the backend for new print jobs assigned to this agent."""
-        printer_id = config.PRINTER_ID
-        response = self._request("GET", f"/agent/{printer_id}/jobs/pending")
+        """GET /agent/{agent_id}/jobs/pending"""
+        response = self._request("GET", f"/agent/jobs/pending")
         if response and "jobs" in response:
             return response["jobs"]
         return []
@@ -127,7 +102,7 @@ class APIClientService:
     def update_job_status(self, job_id: str, status: str, details: str = "") -> bool:
         """Updates the cloud regarding the progress of a specific job."""
         payload = {"status": status, "details": details}
-        response = self._request("PATCH", f"/jobs/{job_id}/status", json=payload)
+        response = self._request("PATCH", f"/agent/jobs/{job_id}/status", json=payload)
         return response is not None
 
     def download_job_file(self, file_url: str, destination_path: str) -> bool:
@@ -145,8 +120,37 @@ class APIClientService:
             logger.error(f"Failed to download job file from {file_url}: {e}")
             return False
 
-
     def get_job_details(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Fetches the current truth from the cloud for a specific job."""
         response = self._request("GET", f"/jobs/{job_id}")
         return response
+
+    @with_retries(
+        max_retries=config.API_MAX_RETRIES,
+        exceptions=(requests.exceptions.ConnectionError, requests.exceptions.Timeout),
+    )
+    def _request(
+        self, method: str, endpoint: str, **kwargs
+    ) -> Optional[Dict[str, Any]]:
+        """Internal helper to execute requests and catch standard errors."""
+        url = f"{self.base_url}/{endpoint.lstrip('/')}"
+
+        # Ensure the header is actually present before the request goes out
+        if self.token and "Authorization" not in self.session.headers:
+            self.session.headers["Authorization"] = f"Bearer {self.token}"
+
+        req_kwargs: Dict[str, Any] = {"timeout": float(config.API_TIMEOUT_DEFAULT)}
+        req_kwargs.update(kwargs)
+
+        try:
+            response = self.session.request(method, url, **req_kwargs)
+            response.raise_for_status()
+
+            # Return JSON if content exists, else an empty dict for 204 No Content
+            return response.json() if response.content else {}
+
+        except requests.exceptions.HTTPError as e:
+            logger.error(
+                f"HTTP Error [{e.response.status_code}] on {url}: {e.response.text}"
+            )
+            return None

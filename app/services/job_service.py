@@ -4,6 +4,7 @@ from typing import Dict, Any
 
 from app.core.config import config
 from app.core.local_agent_db import LocalAgentDB
+from app.repositories.agent_repo import AgentRepository
 from app.services.api_client_service import APIClientService
 from app.services.printer_service import PrinterService
 from app.services.storage_service import StorageService
@@ -17,8 +18,8 @@ class JobService:
     Cloud API -> Database -> File Download -> Print Dispatch -> Cloud Update
     """
 
-    def __init__(self):
-        self.api_client = APIClientService()
+    def __init__(self, api_client=APIClientService()):
+        self.api_client = api_client
         self.printer_service = PrinterService()
         self.storage_service = StorageService()
 
@@ -41,42 +42,53 @@ class JobService:
         """
         try:
             with LocalAgentDB.get_connection() as conn:
-                cursor = conn.execute("SELECT * FROM jobs WHERE status IN ('downloading', 'printing')")
+                cursor = conn.execute(
+                    "SELECT * FROM jobs WHERE status IN ('downloading', 'printing')"
+                )
                 stuck_jobs = cursor.fetchall()
 
             for row in stuck_jobs:
                 job_id = row["job_id"]
-                file_path_str = row.get("file_path") 
-                
+                file_path_str = row.get("file_path")
+
                 # 1. Ask the Cloud for the real status
                 cloud_job = self.api_client.get_job_details(job_id)
 
                 if not cloud_job:
-                    logger.warning(f"Could not verify job {job_id} with cloud. Leaving in queue for next cycle.")
+                    logger.warning(
+                        f"Could not verify job {job_id} with cloud. Leaving in queue for next cycle."
+                    )
                     continue
 
                 cloud_status = cloud_job.get("status")
 
                 # 2. SCENARIO A: The backend already refunded/failed the job
                 if cloud_status in ["failed", "cancelled", "refunded"]:
-                    logger.warning(f"Job {job_id} was cancelled by backend during power outage. Scrapping local print.")
+                    logger.warning(
+                        f"Job {job_id} was cancelled by backend during power outage. Scrapping local print."
+                    )
                     self._update_db_status(job_id, "failed")
-                    
+
                     # Safely move the file to the failed directory if it exists
                     if file_path_str:
-                        Path(file_path_str).rename(config.JOB_FAILED_DIR / Path(file_path_str).name)
+                        Path(file_path_str).rename(
+                            config.JOB_FAILED_DIR / Path(file_path_str).name
+                        )
 
                 # 3. SCENARIO B: The backend still thinks it's printing (Short power outage)
                 elif cloud_status == "printing":
-                    logger.info(f"Job {job_id} is still valid in the cloud. Marking as failed to prevent double-prints.")
-                    # Safest MVP approach: Fail it and let the user try again. 
+                    logger.info(
+                        f"Job {job_id} is still valid in the cloud. Marking as failed to prevent double-prints."
+                    )
+                    # Safest MVP approach: Fail it and let the user try again.
                     # If we blindly resend to CUPS, CUPS might have also saved it during the outage, causing 2 copies to print!
-                    self._fail_job(job_id, "Agent experienced a power loss during processing.")
+                    self._fail_job(
+                        job_id, "Agent experienced a power loss during processing."
+                    )
 
         except Exception as e:
             logger.error(f"Error recovering interrupted jobs: {e}")
-            
-            
+
     def _handle_single_job(self, job_data: Dict[str, Any]) -> None:
         """Walks a single job through the entire download and print pipeline."""
         job_id = job_data.get("id")

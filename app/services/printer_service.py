@@ -5,6 +5,7 @@ from app.core.config import config
 
 # Assuming you have a lower-level wrapper for CUPS or Windows Spooler
 from app.services.cups_service import CUPSManager
+from app.repositories.agent_repo import AgentRepository
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +25,7 @@ class PrinterService:
         logger.debug("Fetching local printers...")
         # Mocking the response for now
         return self.cups.get_printers()
-        # return [
-        #     {"id": "printer_1", "name": "Office_LaserJet", "status": "idle"},
-        #     {"id": "printer_2", "name": "Label_Printer_Front", "status": "offline"},
-        # ]
+        
 
     def is_printer_ready(self, printer_name: str) -> bool:
         """Checks if a specific printer is currently online and ready to accept jobs."""
@@ -94,3 +92,30 @@ class PrinterService:
                 os.rename(printing_path, failed_path)
 
             return False
+
+    def sync_printers_with_cloud(self, api_client):
+        """Scans local hardware and registers/updates them on the backend."""
+        local_printers = self.get_available_printers() 
+        
+        # Format for API: List of dicts with name and capabilities
+        payload = []
+        for p in local_printers:
+            payload.append({
+                "name": p["name"],
+                "hardware_id": p["name"],  # For CUPS, the queue name is the hardware ID
+                "is_online": p["status"] in ["idle", "printing"],
+                "supports_color": p.get("supports_color", False),
+                "supports_duplex": p.get("supports_duplex", False)
+            })
+        
+        # Call the new sync endpoint (to be added to APIClientService)
+        cloud_map = api_client.sync_printers(payload)
+        
+        if cloud_map:
+            # Update the AgentRepository with the new mapping
+            from app.repositories.agent_repo import AgentRepository
+            repo = AgentRepository()
+            config = repo.get_config()
+            config.printer_map = cloud_map
+            repo.save_config(config)
+            logger.info(f"Synced {len(cloud_map)} printers with cloud.")
