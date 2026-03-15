@@ -1,14 +1,10 @@
 import logging
 import os
 from pathlib import Path
+from typing import Optional
 from app.core.config import config
 
-# Assuming you have a lower-level wrapper for CUPS or Windows Spooler
-from app.services.cups_service import CUPSManager
-from app.repositories.agent_repo import AgentRepository
-
 logger = logging.getLogger(__name__)
-
 
 class PrinterService:
     """
@@ -16,16 +12,25 @@ class PrinterService:
     Validates files, checks printer availability, and dispatches jobs to the OS.
     """
 
-    def __init__(self):
-        self.cups = CUPSManager()
-        pass
+    def __init__(self, api_client, cups_manager, printer_repo, storage_service):
+        self.api_client = api_client
+        self.cups_manager = cups_manager
+        self.printer_repo = printer_repo
+        self.storage_service = storage_service
 
     def get_available_printers(self) -> list:
         """Fetches a list of all installed printers on the host machine."""
         logger.debug("Fetching local printers...")
-        # Mocking the response for now
-        return self.cups.get_printers()
+        return self.cups_manager.get_printers()
         
+    def get_printer_name_by_cloud_uuid(self, cloud_uuid: str) -> Optional[str]:
+        """Translates a Cloud UUID back to the printer's physical CUPS name."""
+        printer_map = self.printer_repo.get_printer_map()
+        # printer_map 
+        for printer_name, mapped_uuid in printer_map.items():
+            if mapped_uuid == cloud_uuid:
+                return printer_name
+        return None
 
     def is_printer_ready(self, printer_name: str) -> bool:
         """Checks if a specific printer is currently online and ready to accept jobs."""
@@ -39,10 +44,12 @@ class PrinterService:
     def dispatch_job(
         self,
         job_id: str,
-        printer_name: str,
+        cloud_printer_uuid: str,
         file_path: Path,
         copies: int,
         is_color: bool,
+        on_success,
+        on_failure
     ) -> bool:
         """
         Sends a downloaded file to the local OS printer queue.
@@ -51,7 +58,13 @@ class PrinterService:
         if not file_path.exists():
             logger.error(f"Cannot print job {job_id}: File not found at {file_path}")
             return False
+        
+        printer_name = self.get_printer_name_by_cloud_uuid(cloud_printer_uuid)
 
+        if not printer_name:
+            logger.error(f"Cannot dispatch job: Unknown Cloud UUID '{cloud_printer_uuid}'. Is the printer mapped?")
+            return False
+        
         if not self.is_printer_ready(printer_name):
             logger.error(
                 f"Cannot dispatch job {job_id}: Printer '{printer_name}' is offline."
@@ -62,14 +75,18 @@ class PrinterService:
             logger.info(f"Dispatching job {job_id} to printer {printer_name}...")
 
             # Move file to 'printing' directory
-            printing_path = config.JOB_PRINTING_DIR / file_path.name
-            os.rename(file_path, printing_path)
+            printing_path = self.storage_service.transition_job_file(file_path.name, "ready", "printing")
 
-            # --- OS Level Print Command Goes Here ---
-            success_job_id = self.cups.print_file(
-                printer_name, str(printing_path), title=f"Inkify_{job_id}"
+            # OS Level Print Command
+            success_job_id = self.cups_manager.print_file_async(
+                printer_name=printer_name,
+                file_path=str(printing_path),
+                title=f"Inkify_{job_id}",
+                copies=copies,
+                is_color=is_color,
+                on_success=on_success,
+                on_failure=on_failure
             )
-            # success_job_id = 12345  # Mock CUPS job ID
 
             if success_job_id:
                 logger.info(
@@ -93,8 +110,12 @@ class PrinterService:
 
             return False
 
-    def sync_printers_with_cloud(self, api_client):
+    def sync_printers_with_cloud(self):
         """Scans local hardware and registers/updates them on the backend."""
+        if not self.api_client:
+            logger.error("API Client not provided for sync.")
+            return
+        
         local_printers = self.get_available_printers() 
         
         # Format for API: List of dicts with name and capabilities
@@ -109,13 +130,18 @@ class PrinterService:
             })
         
         # Call the new sync endpoint (to be added to APIClientService)
-        cloud_map = api_client.sync_printers(payload)
+        response = self.api_client.sync_printers(payload)
         
-        if cloud_map:
-            # Update the AgentRepository with the new mapping
-            from app.repositories.agent_repo import AgentRepository
-            repo = AgentRepository()
-            config = repo.get_config()
-            config.printer_map = cloud_map
-            repo.save_config(config)
-            logger.info(f"Synced {len(cloud_map)} printers with cloud.")
+        if response and isinstance(response, dict):
+            # Handle if backend wraps in "printers" key or returns direct map
+            cloud_map = response.get("printers", response) if "printers" in response else response
+            self.printer_repo.save_printer_map(cloud_map)
+            logger.info(f"Synced {len(cloud_map)} printers.")
+            
+    def check_for_hardware_changes(self):
+        """Point 11: Auto-discovery check"""
+        current_local = self.cups_manager.get_printers()
+        # If hardware count changed, trigger sync
+        if len(current_local) != len(self.printer_repo.get_printer_map()):
+            logger.info("New hardware detected. Re-syncing...")
+            self.sync_printers_with_cloud()

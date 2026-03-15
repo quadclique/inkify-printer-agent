@@ -79,7 +79,9 @@ class AppConfig:
     RETRY_MAX_DELAY = int(os.getenv("RETRY_MAX_DELAY", 10))
     THREAD_JOIN_TIMEOUT = int(os.getenv("THREAD_JOIN_TIMEOUT", 5))
     FILE_CHUNK_SIZE = int(os.getenv("FILE_CHUNK_SIZE", 8192))
-
+    DISCOVERY_INTERVAL = int(os.getenv("DISCOVERY_INTERVAL", 300))  
+    MAX_WORKERS = int(os.getenv("MAX_WORKERS", 2))
+    ALLOWED_EXTENSIONS = os.getenv("ALLOWED_EXTENSIONS", {".pdf"})
     # Cleanup rules
     CLEANUP_RETENTION_DAYS = int(os.getenv("CLEANUP_RETENTION_DAYS", 7))
     CLEANUP_INTERVAL_SECONDS = int(os.getenv("CLEANUP_INTERVAL_SECONDS", 86400))
@@ -91,8 +93,9 @@ class AppConfig:
         os.getenv("UPDATE_CHECK_INTERVAL", 21600)
     )  # default 6 hours
 
-    PRINTER_ID = os.getenv("PRINTER_ID", str(uuid.uuid5(uuid.NAMESPACE_DNS, "inkify-default-printer")))# Instantiate a global config object for easy import
+    PRINTER_ID = os.getenv(
+        "PRINTER_ID", str(uuid.uuid5(uuid.NAMESPACE_DNS, "inkify-default-printer"))
+    )  # Instantiate a global config object for easy import
+
 
 config = AppConfig()
-
-

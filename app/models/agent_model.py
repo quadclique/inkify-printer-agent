@@ -9,7 +9,6 @@ class AgentModel:
     agent_id: str = ""
     agent_token: str = ""
     location: str = "unassigned"
-    printer_map: Dict[str, str] = field(default_factory=dict)
     features_enabled: Dict[str, bool] = field(default_factory=dict)
 
     @classmethod
@@ -18,7 +17,6 @@ class AgentModel:
             agent_id=data.get("agent_id", ""),
             agent_token=data.get("agent_token", ""),
             location=data.get("location", "unassigned"),
-            printer_map=data.get("printer_map", {}),
             features_enabled=data.get("features", {}),
         )
 
@@ -28,6 +26,5 @@ class AgentModel:
             "agent_id": self.agent_id,
             "agent_token": self.agent_token,
             "location": self.location,
-            "printer_map": self.printer_map,
             "features": self.features_enabled,
         }

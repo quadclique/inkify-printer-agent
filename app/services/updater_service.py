@@ -5,7 +5,6 @@ from pathlib import Path
 import subprocess
 
 from app.core.config import config
-from app.services.api_client_service import APIClientService
 
 logger = logging.getLogger(__name__)
 
@@ -16,8 +15,8 @@ class UpdaterService:
     during the designated maintenance window.
     """
 
-    def __init__(self):
-        self.api_client = APIClientService()
+    def __init__(self, api_client):
+        self.api_client = api_client
         self.current_version = self._get_current_version()
         self.last_check_time = 0
         self.pending_update_url = None
@@ -26,11 +25,13 @@ class UpdaterService:
         """Reads the current version from the version.txt file."""
         try:
             if config.VERSION_FILE.exists():
-                return config.VERSION_FILE.read_text().strip()
-            return "0.0.0"
+                file_version = config.VERSION_FILE.read_text().strip()
+                if file_version:  # Ensure it's not just an empty string
+                    return file_version
+            return config.APP_VERSION
         except Exception as e:
             logger.error(f"Failed to read version file: {e}")
-            return "0.0.0"
+            return config.APP_VERSION
 
     def check_for_updates(self) -> None:
         """

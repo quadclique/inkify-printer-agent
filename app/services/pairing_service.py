@@ -1,16 +1,15 @@
 import logging
 import socket
-from app.repositories.agent_repo import AgentRepository
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-
 class PairingService:
-    def __init__(self, api_client):
+    def __init__(self, api_client, agent_repo):
         self.api_client = api_client
-        self.agent_repo = AgentRepository()
+        self.agent_repo = agent_repo
 
-    def ensure_paired(self, cli_token: str = None) -> bool:
+    def ensure_paired(self, cli_token: Optional[str] = None) -> bool:
         agent_config = self.agent_repo.get_config()
 
         # 1. Already registered?

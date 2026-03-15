@@ -1,7 +1,8 @@
 import subprocess
 import logging
 import time
-from typing import List, Dict, Optional
+import threading
+from typing import List, Dict, Optional, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class CUPSManager:
                             status = "printing"
                         else:
                             status = "offline"
-                        
+
                         caps = self.get_printer_capabilities(printer_name)
 
                         printers.append(
@@ -61,7 +62,7 @@ class CUPSManager:
         except subprocess.CalledProcessError as e:
             logger.error(f"Failed to query printers: {e.stderr}")
             return []
-        
+
     def get_printer_capabilities(self, printer_name: str) -> Dict[str, bool]:
         try:
             result = subprocess.run(
@@ -82,17 +83,30 @@ class CUPSManager:
                 "supports_color": False,
                 "supports_duplex": False,
             }
-            
-    def wait_for_job_completion(self, os_job_id: str, timeout: int = 300) -> bool:
+
+    def wait_for_job_completion(
+        self,
+        os_job_id: str,
+        on_success: Optional[Callable[[], None]],
+        on_failure: Optional[Callable[[str], None]],
+        timeout: int = 300,
+    ) -> bool:
+        """
+        Runs invisibly in the background. Executes callbacks based on hardware states.
+        """
         start_time = time.time()
         while time.time() - start_time < timeout:
             # Check if job is still in the queue
             result = subprocess.run(
-                ["lpstat", "-W", "completed", "-j", os_job_id],
+                ["lpstat", "-W", "completed"],
                 capture_output=True,
                 text=True,
             )
-            if "completed" in result.stdout.lower():
+
+            if os_job_id in result.stdout.lower():
+                logger.info(f"Job {os_job_id} finished printing successfully.")
+                if on_success:
+                    on_success()
                 return True
 
             # Check for errors/jams in the active queue
@@ -101,18 +115,28 @@ class CUPSManager:
                 "out of paper" in active.stdout.lower()
                 or "jam" in active.stdout.lower()
             ):
+                logger.warning(
+                    f"Printer attention required for {os_job_id} (Jam/Empty). Waiting for resolution..."
+                )
                 return False
 
             time.sleep(2)  # Poll every 2 seconds
+
+        error_msg = f"Job {os_job_id} timed out after {timeout} seconds in OS queue."
+        logger.error(error_msg)
+        if on_failure:
+            on_failure(error_msg)
         return False  # Timeout
 
-    def print_file(
+    def print_file_async(
         self,
         printer_name: str,
         file_path: str,
         title: str = "Inkify_Job",
         copies: int = 1,
         is_color: bool = False,
+        on_success: Optional[Callable[[], None]] = None,
+        on_failure: Optional[Callable[[str], None]] = None,
     ) -> Optional[str]:
         """
         Dispatches a file to a specific printer using the `lp` command.
@@ -145,23 +169,31 @@ class CUPSManager:
             if "request id is" in output:
                 # Extract just the job ID part (e.g., "HP_LaserJet-123")
                 os_job_id = output.split()[3]
+                logger.info(f"Job {os_job_id} dispatched. Starting background monitor.")
+
                 # Check if it actually printed!
-                success = self.wait_for_job_completion(os_job_id, 300)
+                # Spin up a background thread, passing the callbacks
+                monitor_thread = threading.Thread(
+                    target=self.wait_for_job_completion,
+                    args=(os_job_id, on_success, on_failure),
+                    daemon=True,
+                )
+                monitor_thread.start()
 
-                if success:
-                    return os_job_id
-                else:
-                    logger.error(
-                        f"Job {os_job_id} failed to complete in OS queue (Timeout or Jam)."
-                    )
-                    return None
+                return os_job_id
 
-            return "unknown_job_id"
+            error_msg = f"Job failed to complete in OS queue (Timeout or Jam)."
+
+            if on_failure:
+                logger.error(error_msg)
+            return None
 
         except subprocess.CalledProcessError as e:
-            logger.error(
-                f"OS failed to print file {file_path} to {printer_name}. Error: {e.stderr}"
-            )
+            error_msg = f"OS failed to print file {file_path} to {printer_name}. Error: {e.stderr}"
+            logger.error(error_msg)
+            # Instantly trigger the failure callback if the command aborts
+            if on_failure:
+                on_failure(error_msg)
             return None
 
     def clear_queue(self, printer_name: str) -> bool:
@@ -171,10 +203,14 @@ class CUPSManager:
         """
         try:
             # 'cancel -a <printer>' clears all jobs for that destination
-            subprocess.run(["cancel", "-a", printer_name], check=True, capture_output=True)
+            subprocess.run(
+                ["cancel", "-a", printer_name], check=True, capture_output=True
+            )
             logger.info(f"Successfully cleared print queue for {printer_name}.")
             return True
         except subprocess.CalledProcessError as e:
             # This often triggers simply because the queue is already empty, which is fine.
-            logger.debug(f"Queue clear skipped or failed for {printer_name} (Queue might already be empty).")
+            logger.debug(
+                f"Queue clear skipped or failed for {printer_name} (Queue might already be empty)."
+            )
             return False

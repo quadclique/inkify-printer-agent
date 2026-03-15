@@ -1,12 +1,12 @@
 import logging
 import requests
+import threading
 from requests.structures import CaseInsensitiveDict
 from requests.adapters import HTTPAdapter
 from typing import Dict, Any, Optional, List
 from app.core.config import config
 from app.utils.retry_utils import with_retries
 from app.utils.hardware_utils import get_hardware_id
-from app.repositories.agent_repo import AgentRepository
 
 logger = logging.getLogger(__name__)
 
@@ -14,15 +14,17 @@ logger = logging.getLogger(__name__)
 class APIClientService:
     """Handles all outbound HTTP communication with the Inkify backend."""
 
-    def __init__(self):
+    def __init__(self, agent_repo):
+        
         self.base_url = config.API_URL.rstrip("/")
 
         # Pull token from YAML file instead of just env
-        agent_config = AgentRepository().get_config()
+        agent_config = agent_repo.get_config()
         self.agent_id = agent_config.agent_id
 
         self.token = agent_config.agent_token or config.AGENT_TOKEN
 
+        self._lock = threading.Lock()
         self.session = requests.Session()
         
         # Increase connection pool size for multithreading
@@ -37,7 +39,6 @@ class APIClientService:
         headers = {
             "Content-Type": "application/json",
             "User-Agent": f"{config.APP_NAME}/{config.APP_VERSION}",
-            "Connection": "close"
         }
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
@@ -95,8 +96,14 @@ class APIClientService:
         """Polls the backend for new print jobs assigned to this agent."""
         """GET /agent/{agent_id}/jobs/pending"""
         response = self._request("GET", f"/agent/jobs/pending")
-        if response and "jobs" in response:
-            return response["jobs"]
+        
+        # If FastAPI returns a raw list: [ {job1}, {job2} ]
+        if isinstance(response, list):
+            return response
+            
+        # If the backend returns a dict: {"jobs": [ {job1}, {job2} ]}
+        if response and isinstance(response, dict) and "jobs" in response:
+            return response.get("jobs", [])
         return []
 
     def update_job_status(self, job_id: str, status: str, details: str = "") -> bool:
@@ -105,11 +112,16 @@ class APIClientService:
         response = self._request("PATCH", f"/agent/jobs/{job_id}/status", json=payload)
         return response is not None
 
-    def download_job_file(self, file_url: str, destination_path: str) -> bool:
+    @with_retries(
+        max_retries=config.API_MAX_RETRIES,
+        exceptions=(requests.exceptions.ConnectionError, requests.exceptions.Timeout, requests.exceptions.ChunkedEncodingError),
+    )
+    def download_job_file(self, document_id: str, destination_path: str) -> bool:
         """Downloads the actual print payload (PDF/image) to the local disk."""
+        url = f"{self.base_url}/documents/{document_id}/download"
         try:
             with self.session.get(
-                file_url, stream=True, timeout=config.API_TIMEOUT_DOWNLOAD
+                url, stream=True, timeout=config.API_TIMEOUT_DOWNLOAD
             ) as r:
                 r.raise_for_status()
                 with open(destination_path, "wb") as f:
@@ -117,12 +129,12 @@ class APIClientService:
                         f.write(chunk)
             return True
         except Exception as e:
-            logger.error(f"Failed to download job file from {file_url}: {e}")
+            logger.error(f"Failed to download document {document_id}: {e}")
             return False
 
     def get_job_details(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Fetches the current truth from the cloud for a specific job."""
-        response = self._request("GET", f"/jobs/{job_id}")
+        response = self._request("GET", f"/print-jobs/{job_id}/queue-status")
         return response
 
     @with_retries(
@@ -132,13 +144,17 @@ class APIClientService:
     def _request(
         self, method: str, endpoint: str, **kwargs
     ) -> Optional[Dict[str, Any]]:
+        
         """Internal helper to execute requests and catch standard errors."""
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
+        
+        # Acquire lock ONLY to safely read/modify shared headers
+        with self._lock:
+            # Ensure the header is actually present before the request goes out
+            if self.token and "Authorization" not in self.session.headers:
+                self.session.headers["Authorization"] = f"Bearer {self.token}"
 
-        # Ensure the header is actually present before the request goes out
-        if self.token and "Authorization" not in self.session.headers:
-            self.session.headers["Authorization"] = f"Bearer {self.token}"
-
+        # Multiple threads can execute this slow network call simultaneously.
         req_kwargs: Dict[str, Any] = {"timeout": float(config.API_TIMEOUT_DEFAULT)}
         req_kwargs.update(kwargs)
 

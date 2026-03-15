@@ -4,7 +4,6 @@ import threading
 from typing import Dict, Any
 
 from app.core.config import config
-from app.services.api_client_service import APIClientService
 from app.services.printer_service import PrinterService
 from app.utils.system_utils import get_system_metrics
 
@@ -17,8 +16,9 @@ class HeartbeatService:
     report that the agent is online, along with basic system health metrics.
     """
 
-    def __init__(self, api_client=APIClientService()):
+    def __init__(self, api_client, printer_service):
         self.api_client = api_client
+        self.printer_service = printer_service
         self.interval = config.HEARTBEAT_INTERVAL
         self.join_timeout = config.THREAD_JOIN_TIMEOUT
         # Thread control events
@@ -71,8 +71,7 @@ class HeartbeatService:
         metrics = get_system_metrics()  # Example: { "cpu": 45.2, "ram_mb": 1024 }
         # metrics = {"cpu": 0.0, "ram_mb": 0}  # Mock for now
 
-        printer_service = PrinterService()
-        local_printers = printer_service.get_available_printers()
+        local_printers = self.printer_service.get_available_printers()
 
         return {
             "version": "1.0.0",  # You could read this from constants.VERSION_FILE

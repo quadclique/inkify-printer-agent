@@ -3,19 +3,18 @@ import logging
 from typing import Dict, Any
 
 from app.core.local_agent_db import LocalAgentDB
-from app.services.api_client_service import APIClientService
 
 logger = logging.getLogger(__name__)
 
 
-class QueueManagerService:
+class QueueService:
     """
     Handles offline resilience. If the cloud cannot be reached, events
     (like job completion statuses) are queued locally and re-attempted later.
     """
 
-    def __init__(self):
-        self.api_client = APIClientService()
+    def __init__(self, api_client):
+        self.api_client = api_client
 
     def enqueue_event(
         self, job_id: str, event_type: str, payload: Dict[str, Any]

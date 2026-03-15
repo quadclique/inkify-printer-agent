@@ -1,8 +1,4 @@
-agent_id: 214e0387-adde-4049-8b8e-373834336328
-agent_token: 214e0387-adde-4049-8b8e-373834336328:Z_PwB-ggXXKe1FgJuiYPv9fPzbzc8sCtUO7ezZyRO3Y
+agent_id: a23037ce-a296-41dc-9bdb-61ea555c2e5b
+agent_token: a23037ce-a296-41dc-9bdb-61ea555c2e5b:wfsRgJhcmAd5jzgw0cfK0VLoJl-OHVElzG5jOZI3t8Q
 features: {}
 location: unassigned
-printer_map:
-  message: Successfully synced 1 printers.
-  printer_ids:
-  - 73dd00a7-de82-46e2-afc9-ed27721831fe

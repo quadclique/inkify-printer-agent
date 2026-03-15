@@ -1,13 +1,12 @@
 import logging
 from pathlib import Path
 from typing import Dict, Any
+from concurrent.futures import ThreadPoolExecutor
 
 from app.core.config import config
 from app.core.local_agent_db import LocalAgentDB
-from app.repositories.agent_repo import AgentRepository
-from app.services.api_client_service import APIClientService
-from app.services.printer_service import PrinterService
-from app.services.storage_service import StorageService
+
+from app.models.job_model import JobModel
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +17,12 @@ class JobService:
     Cloud API -> Database -> File Download -> Print Dispatch -> Cloud Update
     """
 
-    def __init__(self, api_client=APIClientService()):
+    def __init__(self, api_client, printer_service, storage_service, queue_service):
         self.api_client = api_client
-        self.printer_service = PrinterService()
-        self.storage_service = StorageService()
+        self.printer_service = printer_service
+        self.storage_service = storage_service
+        self.queue_service = queue_service
+        self.executor = ThreadPoolExecutor(max_workers=config.MAX_WORKERS)
 
     def process_pending_jobs(self) -> None:
         """Fetches and processes all pending jobs from the cloud."""
@@ -33,7 +34,7 @@ class JobService:
         logger.info(f"Found {len(jobs)} pending jobs from the cloud.")
 
         for job_data in jobs:
-            self._handle_single_job(job_data)
+            self.executor.submit(self._handle_single_job, job_data)
 
     def recover_interrupted_jobs(self) -> None:
         """
@@ -91,70 +92,72 @@ class JobService:
 
     def _handle_single_job(self, job_data: Dict[str, Any]) -> None:
         """Walks a single job through the entire download and print pipeline."""
-        job_id = job_data.get("id")
-        printer_name = job_data.get("printer_name")
-        file_url = job_data.get("file_url")
-        copies = job_data.get("copies", 1)
-        is_color = job_data.get("is_color", False)
+        # Map the dictionary to our strict model
+        job = JobModel.from_api_response(job_data)
 
-        if not all([job_id, printer_name, file_url]):
-            logger.error(f"Malformed job data received: {job_data}")
+        # Validation: Ensure all required IDs are present
+        if not all([job.job_id, job.printer_id, job.document_id]):
+            logger.error(
+                f"Malformed job data: Required IDs missing",
+                extra={"job_data": job_data},
+            )
             return
 
-        # 1. Register job in local database
-        self._register_job_in_db(str(job_id), str(printer_name))
+        # Register job in local database
+        self._register_job_in_db(str(job.job_id), str(job.printer_id))
+        # Notify cloud we are downloading
+        self.api_client.update_job_status(str(job.job_id), "downloading")
 
-        # 2. Notify cloud we are downloading
-        self.api_client.update_job_status(str(job_id), "downloading")
+        # Download the file using document_id
+        download_path = config.JOB_DOWNLOAD_DIR / f"{job.job_id}.pdf"
 
-        # 3. Download the file
-        if not isinstance(file_url, str) or not job_id or not printer_name:
-            logger.error(f"Invalid job data: {job_data}")
-            return
+        success = self.api_client.download_job_file(
+            str(job.document_id), str(download_path)
+        )
 
-        file_ext = file_url.split(".")[-1][:4] if "." in file_url else "pdf"
-        download_path = config.JOB_DOWNLOAD_DIR / f"{job_id}.{file_ext}"
-
-        success = self.api_client.download_job_file(str(file_url), str(download_path))
         if not success:
-            self._fail_job(str(job_id), "Failed to download file from cloud.")
+            self._fail_job(str(job.job_id), "Failed to download file from cloud.")
             return
 
-        # 4. Verify the file isn't corrupted!
+        # Verify the file isn't corrupted!
         expected_hash = job_data.get(
             "sha256_hash"
         )  # Assuming your cloud API sends this
         if not self.storage_service.verify_download(download_path, str(expected_hash)):
             self.storage_service.cleanup_failed_download(download_path.name)
-            self._fail_job(str(job_id), "File download was corrupted.")
+            self._fail_job(str(job.job_id), "File download was corrupted.")
             return
 
-        # 5. Move it to the ready folder securely
+        # Move it to the ready folder securely
         ready_path = self.storage_service.transition_job_file(
             download_path.name, "download", "ready"
         )
         if not ready_path:
-            self._fail_job(str(job_id), "Failed to prepare file for printing.")
+            self._fail_job(str(job.job_id), "Failed to prepare file for printing.")
             return
 
-        # 6. Move to 'ready' directory
-        ready_path = config.JOB_READY_DIR / download_path.name
-        download_path.rename(ready_path)
+        # Notify cloud we are printing
+        self._update_db_status(str(job.job_id), "printing")
+        success = self.api_client.update_job_status(str(job.job_id), "printing")
 
-        # 7. Notify cloud we are printing
-        self._update_db_status(str(job_id), "printing")
-        self.api_client.update_job_status(str(job_id), "printing")
-
-        # 8. Dispatch to physical printer
-        print_success = self.printer_service.dispatch_job(
-            str(job_id), str(printer_name), ready_path, copies, is_color
+        if not success:
+            self.queue_service.enqueue_event(
+                job.job_id, "status_update", {"status": "printing"}
+            )
+            
+        def on_print_success():
+            self.storage_service.transition_job_file(download_path.name, "printing", "completed")
+            self._complete_job(str(job.job_id))
+            
+        def on_print_failure(reason):
+            self.storage_service.transition_job_file(download_path.name, "printing", "failed")
+            self._fail_job(str(job.job_id), reason)
+            
+        # Dispatch to physical printer
+        self.printer_service.dispatch_job(
+            str(job.job_id), str(job.printer_id), ready_path, 1, False, on_success=on_print_success, on_failure=on_print_failure
         )
 
-        # 9. Finalize status
-        if print_success:
-            self._complete_job(str(job_id))
-        else:
-            self._fail_job(str(job_id), f"Failed to print to {printer_name}.")
 
     # --- Database & Status Helpers ---
 
@@ -166,7 +169,7 @@ class JobService:
         """
         try:
             with LocalAgentDB.get_connection() as conn:
-                conn.execute(sql, (job_id, printer_id))
+                conn.execute(sql, (job_id, printer_id, "pending"))
                 conn.commit()
         except Exception as e:
             logger.error(f"DB Error registering job {job_id}: {e}")
@@ -192,3 +195,13 @@ class JobService:
         logger.info(f"Job {job_id} completed successfully.")
         self._update_db_status(job_id, "completed")
         self.api_client.update_job_status(job_id, "completed")
+
+    def shutdown(self) -> None:
+        """
+        Gracefully shuts down the thread pool. 
+        Waits for active downloads/dispatches to finish before exiting.
+        """
+        logger.info("Shutting down JobService. Waiting for active jobs to wrap up...")
+        # wait=True ensures we don't sever active network connections mid-download
+        self.executor.shutdown(wait=True, cancel_futures=True) 
+        logger.info("JobService shutdown complete.")

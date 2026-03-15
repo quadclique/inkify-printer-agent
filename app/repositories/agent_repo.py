@@ -1,8 +1,6 @@
 import os
 import yaml
 import logging
-from typing import Optional
-from pathlib import Path
 from app.core.config import config
 from app.models.agent_model import AgentModel
 
@@ -27,9 +25,7 @@ class AgentRepository:
     def save_config(self, agent_model: AgentModel) -> bool:
         """Writes the agent configuration to the local YAML file securely."""
         try:
-            # Ensure the config directory exists
             config.AGENT_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-            
             file_path = config.AGENT_CONFIG_FILE
             with open(config.AGENT_CONFIG_FILE, "w") as f:
                 yaml.safe_dump(agent_model.to_dict(), f, default_flow_style=False)

@@ -1,15 +1,22 @@
 import sys
 import time
 import logging
+import threading
+from typing import Optional
 from app.core.config import config
+from app.repositories.agent_repo import AgentRepository
+from app.repositories.printer_repo import PrinterRepository
+
 from app.services.api_client_service import APIClientService
 from app.services.job_service import JobService
-from app.services.queue_service import QueueManagerService
-from app.services.heartbeat_service import HeartbeatService
+from app.services.cups_service import CUPSManager
+from app.services.queue_service import QueueService
 from app.services.cleanup_service import CleanupService
 from app.services.updater_service import UpdaterService
 from app.services.pairing_service import PairingService
 from app.services.printer_service import PrinterService
+from app.services.storage_service import StorageService
+from app.services.heartbeat_service import HeartbeatService
 
 logger = logging.getLogger(__name__)
 
@@ -17,20 +24,27 @@ logger = logging.getLogger(__name__)
 class PrinterAgent:
 
     def __init__(self):
-        self.is_running = False
+        # Initialize Shared Base Services
+        self.agent_repo = AgentRepository()
+        self.printer_repo = PrinterRepository()
+        self.api_client = APIClientService(self.agent_repo)
+        self.cups_manager = CUPSManager()
+        self.storage_service = StorageService()
 
         # Inject the shared API Client
-        self.api_client = APIClientService()
-        self.pairing_service = PairingService(self.api_client)
-        self.job_service = JobService(self.api_client)
-        self.heartbeat_service = HeartbeatService(self.api_client)
+        self.queue_service = QueueService(self.api_client)
+        self.pairing_service = PairingService(self.api_client, self.agent_repo)
+        self.printer_service = PrinterService(self.api_client,self.cups_manager,self.printer_repo, self.storage_service)
+        self.heartbeat_service = HeartbeatService(self.api_client, self.printer_service)
+        self.job_service = JobService(self.api_client, self.printer_service, self.storage_service,self.queue_service)
         
-        self.queue_manager_service = QueueManagerService()
         self.cleanup_service = CleanupService(retention_days=7)
-        self.last_cleanup_time = 0
-        self.updater_service = UpdaterService()
+        self.updater_service = UpdaterService(self.api_client)
+        
+        self.last_cleanup_time = time.time() 
+        self.stop_event = threading.Event()
 
-    def run(self, registration_token: str = None) -> None:
+    def run(self, registration_token: Optional[str] = None) -> None:
         logger.info(f"Starting {config.APP_NAME} in {config.ENVIRONMENT} mode...")
 
         # --- 1. SETUP & AUTHENTICATION PHASE ---
@@ -44,7 +58,7 @@ class PrinterAgent:
 
         # --- 2. HARDWARE SYNC PHASE ---
         logger.info("Syncing local printers with Inkify Cloud...")
-        PrinterService().sync_printers_with_cloud(self.api_client)
+        self.printer_service.sync_printers_with_cloud()
 
         # --- 3. OPERATIONAL PHASE ---
         self.is_running = True
@@ -69,12 +83,12 @@ class PrinterAgent:
 
     def _loop(self) -> None:
         """The core polling loop."""
-        self.queue_manager_service.process_queue()
+        self.queue_service.process_queue()
 
-        while self.is_running:
+        while not self.stop_event.is_set():
             try:
                 # 1. Sync any offline events first
-                self.queue_manager_service.process_queue()
+                self.queue_service.process_queue()
 
                 # 2. Process new print jobs
                 self.job_service.process_pending_jobs()
@@ -86,6 +100,7 @@ class PrinterAgent:
                     > config.CLEANUP_INTERVAL_SECONDS
                 ):
                     self.cleanup_service.run_cleanup()
+                    self.printer_service.sync_printers_with_cloud()
                     self.last_cleanup_time = current_time
 
                 # 4. Check for self-updates
@@ -93,14 +108,15 @@ class PrinterAgent:
                 self.updater_service.apply_update_if_ready()
 
                 # 5. Wait for the configured interval before checking again
-                time.sleep(config.JOB_POLL_INTERVAL)
-
+                self.stop_event.wait(config.JOB_POLL_INTERVAL)
             except Exception as e:
                 logger.error(f"Unexpected error during job polling cycle: {e}")
-                time.sleep(5)
-
+                self.stop_event.wait(5)
     def stop(self) -> None:
         """Halts the agent and cleans up resources."""
+        logger.info("Initiating graceful shutdown...")
+        self.stop_event.set()
         self.is_running = False
         self.heartbeat_service.stop()
+        self.job_service.shutdown()
         logger.info(f"{config.APP_NAME} has shut down.")
