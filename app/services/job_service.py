@@ -50,7 +50,7 @@ class JobService:
 
             for row in stuck_jobs:
                 job_id = row["job_id"]
-                file_path_str = row.get("file_path")
+                file_path_str = row["file_path"]
 
                 # 1. Ask the Cloud for the real status
                 cloud_job = self.api_client.get_job_details(job_id)

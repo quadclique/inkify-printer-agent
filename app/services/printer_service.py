@@ -77,6 +77,9 @@ class PrinterService:
             # Move file to 'printing' directory
             printing_path = self.storage_service.transition_job_file(file_path.name, "ready", "printing")
 
+            if not printing_path:
+                raise Exception("Failed to transition file to printing directory.")
+            
             # OS Level Print Command
             success_job_id = self.cups_manager.print_file_async(
                 printer_name=printer_name,
@@ -107,7 +110,9 @@ class PrinterService:
             if "printing_path" in locals() and printing_path.exists():
                 failed_path = config.JOB_FAILED_DIR / file_path.name
                 os.rename(printing_path, failed_path)
-
+            if on_failure:
+                on_failure(str(e))
+                
             return False
 
     def sync_printers_with_cloud(self):

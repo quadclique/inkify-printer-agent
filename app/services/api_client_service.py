@@ -134,7 +134,7 @@ class APIClientService:
 
     def get_job_details(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Fetches the current truth from the cloud for a specific job."""
-        response = self._request("GET", f"/print-jobs/{job_id}/queue-status")
+        response = self._request("GET", f"/agent/jobs/{job_id}/status")
         return response
 
     @with_retries(
