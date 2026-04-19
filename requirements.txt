@@ -4,6 +4,11 @@ requests           # For making API calls
 psutil             # For gathering system metrics
 PyYAML             # For parsing .yaml config files
 
+
+# --- Platform Specific Dependencies ---
+# PyInstaller will ONLY bundle this when building on a Windows machine
+pywin32; platform_system == "Windows"
+
 # Development & Testing (Optional in Production)
 pytest
 pytest-mock

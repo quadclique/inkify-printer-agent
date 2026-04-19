@@ -9,7 +9,7 @@ from app.repositories.printer_repo import PrinterRepository
 
 from app.services.api_client_service import APIClientService
 from app.services.job_service import JobService
-from app.services.cups_service import CUPSManager
+# from app.services.cups_service import CUPSManager
 from app.services.queue_service import QueueService
 from app.services.cleanup_service import CleanupService
 from app.services.updater_service import UpdaterService
@@ -17,6 +17,8 @@ from app.services.pairing_service import PairingService
 from app.services.printer_service import PrinterService
 from app.services.storage_service import StorageService
 from app.services.heartbeat_service import HeartbeatService
+
+from app.platform.factory import get_printer_manager
 
 logger = logging.getLogger(__name__)
 
@@ -28,13 +30,14 @@ class PrinterAgent:
         self.agent_repo = AgentRepository()
         self.printer_repo = PrinterRepository()
         self.api_client = APIClientService(self.agent_repo)
-        self.cups_manager = CUPSManager()
+        # self.cups_manager = CUPSManager()
+        self.printer_manager = get_printer_manager()
         self.storage_service = StorageService()
 
         # Inject the shared API Client
         self.queue_service = QueueService(self.api_client)
         self.pairing_service = PairingService(self.api_client, self.agent_repo)
-        self.printer_service = PrinterService(self.api_client,self.cups_manager,self.printer_repo, self.storage_service)
+        self.printer_service = PrinterService(self.api_client,self.printer_manager,self.printer_repo, self.storage_service)
         self.heartbeat_service = HeartbeatService(self.api_client, self.printer_service)
         self.job_service = JobService(self.api_client, self.printer_service, self.storage_service,self.queue_service)
         
@@ -43,15 +46,21 @@ class PrinterAgent:
         
         self.last_cleanup_time = time.time() 
         self.stop_event = threading.Event()
+        self.is_running = False
 
-    def run(self, registration_token: Optional[str] = None) -> None:
+    def run(self, ) -> None:
         logger.info(f"Starting {config.APP_NAME} in {config.ENVIRONMENT} mode...")
 
         # --- 1. SETUP & AUTHENTICATION PHASE ---
-        is_paired = self.pairing_service.ensure_paired(registration_token)
-        if not is_paired:
+        # is_paired = self.pairing_service.ensure_paired(registration_token)
+        agent_config = self.agent_repo.get_config()
+        if not agent_config or not agent_config.agent_token:
+            # logger.critical(
+            #     "Agent is not authenticated. Please run the agent with: python app/main.py --token <your_token>"
+            # )
             logger.critical(
-                "Agent is not authenticated. Please run the agent with: python app/main.py --token <your_token>"
+                "Agent is not authenticated. The background service cannot start. "
+                "Please run the installer to pair the device."
             )
             sys.exit(1)
         logger.info("Agent successfully authenticated.")

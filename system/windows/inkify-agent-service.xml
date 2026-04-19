@@ -1,0 +1,22 @@
+<service>
+  <id>inkify-agent</id>
+  
+  <name>Inkify Printer Agent</name>
+  
+  <description>Background agent that connects local hardware to the Inkify Cloud.</description>
+  
+  <executable>%BASE%\inkify-agent.exe</executable>
+  
+  <workingdirectory>%BASE%</workingdirectory>
+
+  <startmode>Automatic</startmode>
+
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="20 sec"/>
+  
+  <stoptimeout>15 sec</stoptimeout>
+
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold> <keepFiles>3</keepFiles>
+  </log>
+</service>

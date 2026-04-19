@@ -12,16 +12,16 @@ class PrinterService:
     Validates files, checks printer availability, and dispatches jobs to the OS.
     """
 
-    def __init__(self, api_client, cups_manager, printer_repo, storage_service):
+    def __init__(self, api_client, printer_manager, printer_repo, storage_service):
         self.api_client = api_client
-        self.cups_manager = cups_manager
+        self.printer_manager = printer_manager
         self.printer_repo = printer_repo
         self.storage_service = storage_service
 
     def get_available_printers(self) -> list:
         """Fetches a list of all installed printers on the host machine."""
         logger.debug("Fetching local printers...")
-        return self.cups_manager.get_printers()
+        return self.printer_manager.get_printers()
         
     def get_printer_name_by_cloud_uuid(self, cloud_uuid: str) -> Optional[str]:
         """Translates a Cloud UUID back to the printer's physical CUPS name."""
@@ -81,7 +81,7 @@ class PrinterService:
                 raise Exception("Failed to transition file to printing directory.")
             
             # OS Level Print Command
-            success_job_id = self.cups_manager.print_file_async(
+            success_job_id = self.printer_manager.print_file_async(
                 printer_name=printer_name,
                 file_path=str(printing_path),
                 title=f"Inkify_{job_id}",
@@ -145,7 +145,7 @@ class PrinterService:
             
     def check_for_hardware_changes(self):
         """Point 11: Auto-discovery check"""
-        current_local = self.cups_manager.get_printers()
+        current_local = self.printer_manager.get_printers()
         # If hardware count changed, trigger sync
         if len(current_local) != len(self.printer_repo.get_printer_map()):
             logger.info("New hardware detected. Re-syncing...")

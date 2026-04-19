@@ -8,13 +8,17 @@ Wants=network-online.target
 Type=simple
 User={{USER}}
 Group={{GROUP}}
-WorkingDirectory={{WORKING_DIR}}
+# WorkingDirectory={{WORKING_DIR}}
+WorkingDirectory=/opt/inkify
 
 # Ensure the virtual environment is in the PATH
-Environment="PATH={{WORKING_DIR}}/.venv/bin:/usr/bin:/usr/local/bin"
+# Environment="PATH={{WORKING_DIR}}/.venv/bin:/usr/bin:/usr/local/bin"
 
 # Start the application using the Python binary inside the virtual environment
-ExecStart={{WORKING_DIR}}/.venv/bin/python app/main.py
+# ExecStart={{WORKING_DIR}}/.venv/bin/python app/main.py
+
+# Execute the standalone binary directly
+ExecStart=/opt/inkify/inkify-agent
 
 # Resilience: If the agent crashes (e.g., out of memory), wait 10 seconds and restart it
 Restart=always

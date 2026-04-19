@@ -92,19 +92,27 @@ class APIClientService:
         response = self._request("POST", f"/agent/heartbeat", json=agent_status)
         return response is not None
 
-    def fetch_pending_jobs(self) -> List[Dict[str, Any]]:
-        """Polls the backend for new print jobs assigned to this agent."""
-        """GET /agent/{agent_id}/jobs/pending"""
-        response = self._request("GET", f"/agent/jobs/pending")
+    # def fetch_pending_jobs(self) -> List[Dict[str, Any]]:
+    #     """Polls the backend for new print jobs assigned to this agent."""
+    #     """GET /agent/{agent_id}/jobs/pending"""
+    #     response = self._request("GET", f"/agent/jobs/pending")
         
-        # If FastAPI returns a raw list: [ {job1}, {job2} ]
-        if isinstance(response, list):
-            return response
+    #     # If FastAPI returns a raw list: [ {job1}, {job2} ]
+    #     if isinstance(response, list):
+    #         return response
             
-        # If the backend returns a dict: {"jobs": [ {job1}, {job2} ]}
-        if response and isinstance(response, dict) and "jobs" in response:
-            return response.get("jobs", [])
-        return []
+    #     # If the backend returns a dict: {"jobs": [ {job1}, {job2} ]}
+    #     if response and isinstance(response, dict) and "jobs" in response:
+    #         return response.get("jobs", [])
+    #     return []
+    
+    def pull_next_job(self) -> Optional[Dict[str, Any]]:
+        """
+        Polls the backend for the next available print job. 
+        The backend automatically locks this job so no other agent can grab it.
+        """
+        response = self._request("POST", "/agent/jobs/next")
+        return response
 
     def update_job_status(self, job_id: str, status: str, details: str = "") -> bool:
         """Updates the cloud regarding the progress of a specific job."""
@@ -112,13 +120,25 @@ class APIClientService:
         response = self._request("PATCH", f"/agent/jobs/{job_id}/status", json=payload)
         return response is not None
 
+    def submit_qr_release(self, qr_token: str) -> bool:
+        """Sends a scanned QR token to the cloud to release a print job."""
+        # _request returns a dict on success, or None on HTTP error
+        response = self._request(
+            "POST", 
+            "/print-jobs/agent/scan-release", 
+            json={"qr_token": qr_token}
+        )
+        return response is not None
+
     @with_retries(
         max_retries=config.API_MAX_RETRIES,
         exceptions=(requests.exceptions.ConnectionError, requests.exceptions.Timeout, requests.exceptions.ChunkedEncodingError),
     )
-    def download_job_file(self, document_id: str, destination_path: str) -> bool:
+    def download_job_file(self, file_url: str, destination_path: str) -> bool:
         """Downloads the actual print payload (PDF/image) to the local disk."""
-        url = f"{self.base_url}/documents/{document_id}/download"
+        # Check if the backend gave us a full URL (like S3) or a relative path
+        url = file_url if file_url.startswith("http") else f"{self.base_url}{file_url}"
+        
         try:
             with self.session.get(
                 url, stream=True, timeout=config.API_TIMEOUT_DOWNLOAD
@@ -129,8 +149,23 @@ class APIClientService:
                         f.write(chunk)
             return True
         except Exception as e:
-            logger.error(f"Failed to download document {document_id}: {e}")
+            logger.error(f"Failed to download document from {url}: {e}")
             return False
+    # def download_job_file(self, document_id: str, destination_path: str) -> bool:
+    #     """Downloads the actual print payload (PDF/image) to the local disk."""
+    #     url = f"{self.base_url}/documents/{document_id}/download"
+    #     try:
+    #         with self.session.get(
+    #             url, stream=True, timeout=config.API_TIMEOUT_DOWNLOAD
+    #         ) as r:
+    #             r.raise_for_status()
+    #             with open(destination_path, "wb") as f:
+    #                 for chunk in r.iter_content(chunk_size=config.FILE_CHUNK_SIZE):
+    #                     f.write(chunk)
+    #         return True
+    #     except Exception as e:
+    #         logger.error(f"Failed to download document {document_id}: {e}")
+    #         return False
 
     def get_job_details(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Fetches the current truth from the cloud for a specific job."""

@@ -9,6 +9,8 @@ class JobModel:
     printer_id: str
     status: str
     document_id: Optional[str] = None
+    copies: int = 1
+    is_color: bool = False
     file_path: Optional[str] = None
     file_url: Optional[str] = None
     expected_hash: Optional[str] = None
@@ -21,8 +23,10 @@ class JobModel:
         return cls(
             job_id=data.get("id", ""),
             printer_id=data.get("printer_id", ""),
-            status=data.get("status", "pending"),
+            status=data.get("status", "downloading"),
             document_id=data.get("document_id"),
+            copies=data.get("copies", 1),
+            is_color=data.get("is_color", False),
             file_url=data.get("file_url"),
             expected_hash=data.get("sha256_hash"),
         )

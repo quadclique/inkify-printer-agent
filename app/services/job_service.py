@@ -24,18 +24,32 @@ class JobService:
         self.queue_service = queue_service
         self.executor = ThreadPoolExecutor(max_workers=config.MAX_WORKERS)
 
+    # def process_pending_jobs(self) -> None:
+    #     """Fetches and processes all pending jobs from the cloud."""
+    #     jobs = self.api_client.fetch_pending_jobs()
+
+    #     if not jobs:
+    #         return  # No jobs to process
+
+    #     logger.info(f"Found {len(jobs)} pending jobs from the cloud.")
+
+    #     for job_data in jobs:
+    #         self.executor.submit(self._handle_single_job, job_data)
+
     def process_pending_jobs(self) -> None:
-        """Fetches and processes all pending jobs from the cloud."""
-        jobs = self.api_client.fetch_pending_jobs()
+        """Pulls and locks jobs one-by-one from the cloud until the queue is empty."""
+        while True:
+            response = self.api_client.pull_next_job()
 
-        if not jobs:
-            return  # No jobs to process
+            if not response or response.get("status") == "idle":
+                break  # Queue is empty. Exit the loop until the next polling cycle.
 
-        logger.info(f"Found {len(jobs)} pending jobs from the cloud.")
-
-        for job_data in jobs:
-            self.executor.submit(self._handle_single_job, job_data)
-
+            job_data = response.get("job")
+            if job_data:
+                logger.info(f"Locked job {job_data['id']} from cloud queue.")
+                # Pass to the thread pool so we can instantly pull the next job!
+                self.executor.submit(self._handle_single_job, job_data)
+                
     def recover_interrupted_jobs(self) -> None:
         """
         Runs on agent startup. Finds jobs that were interrupted by a power loss
@@ -103,17 +117,21 @@ class JobService:
             )
             return
 
-        # Register job in local database
-        self._register_job_in_db(str(job.job_id), str(job.printer_id))
+        
         # Notify cloud we are downloading
-        self.api_client.update_job_status(str(job.job_id), "downloading")
+        # self.api_client.update_job_status(str(job.job_id), "downloading")
 
         # Download the file using document_id
         download_path = config.JOB_DOWNLOAD_DIR / f"{job.job_id}.pdf"
 
-        success = self.api_client.download_job_file(
-            str(job.document_id), str(download_path)
-        )
+        # success = self.api_client.download_job_file(
+        #     str(job.document_id), str(download_path)
+        # )
+        
+        # Register job in local database
+        self._register_job_in_db(str(job.job_id), str(job.printer_id), str(download_path))
+        
+        success = self.api_client.download_job_file(job.file_url, str(download_path))
 
         if not success:
             self._fail_job(str(job.job_id), "Failed to download file from cloud.")
@@ -123,7 +141,7 @@ class JobService:
         expected_hash = job_data.get(
             "sha256_hash"
         )  # Assuming your cloud API sends this
-        if not self.storage_service.verify_download(download_path, str(expected_hash)):
+        if job.expected_hash and not self.storage_service.verify_download(download_path, str(expected_hash)):
             self.storage_service.cleanup_failed_download(download_path.name)
             self._fail_job(str(job.job_id), "File download was corrupted.")
             return
@@ -138,6 +156,8 @@ class JobService:
 
         # Notify cloud we are printing
         self._update_db_status(str(job.job_id), "printing")
+        self._update_db_filepath(str(job.job_id), str(ready_path))
+        
         success = self.api_client.update_job_status(str(job.job_id), "printing")
 
         if not success:
@@ -155,21 +175,21 @@ class JobService:
             
         # Dispatch to physical printer
         self.printer_service.dispatch_job(
-            str(job.job_id), str(job.printer_id), ready_path, 1, False, on_success=on_print_success, on_failure=on_print_failure
+            str(job.job_id), str(job.printer_id), ready_path, job.copies, job.is_color, on_success=on_print_success, on_failure=on_print_failure
         )
 
 
     # --- Database & Status Helpers ---
 
-    def _register_job_in_db(self, job_id, printer_id):
+    def _register_job_in_db(self, job_id, printer_id, file_path):
         """Inserts a new job record into the local SQLite DB."""
         sql = """
-            INSERT OR IGNORE INTO jobs (job_id, printer_id, status) 
-            VALUES (?, ?, ?)
+            INSERT OR IGNORE INTO jobs (job_id, printer_id, status, file_path) 
+            VALUES (?, ?, ?, ?)
         """
         try:
             with LocalAgentDB.get_connection() as conn:
-                conn.execute(sql, (job_id, printer_id, "pending"))
+                conn.execute(sql, (job_id, printer_id, "pending", file_path))
                 conn.commit()
         except Exception as e:
             logger.error(f"DB Error registering job {job_id}: {e}")
@@ -183,7 +203,16 @@ class JobService:
                 conn.commit()
         except Exception as e:
             logger.error(f"DB Error updating job {job_id}: {e}")
-
+    
+    def _update_db_filepath(self, job_id: str, file_path: str) -> None:
+        sql = "UPDATE jobs SET file_path = ?, updated_at = CURRENT_TIMESTAMP WHERE job_id = ?"
+        try:
+            with LocalAgentDB.get_connection() as conn:
+                conn.execute(sql, (file_path, job_id))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"DB Error updating filepath for job {job_id}: {e}") 
+            
     def _fail_job(self, job_id: str, reason: str) -> None:
         """Marks a job as failed locally and in the cloud."""
         logger.error(f"Job {job_id} failed: {reason}")
