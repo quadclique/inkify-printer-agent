@@ -3,6 +3,7 @@ name: Build Inkify Binaries and Installers
 on:
   push:
     branches: [ "main" ]
+    tags: [ "v*" ] # Triggers the pipeline when you push a version tag (e.g., v1.0.0)
   workflow_dispatch: # Allows you to run it manually from the GitHub UI
 
 jobs:
@@ -98,3 +99,48 @@ jobs:
         name: InkifyAgentDeb
         path: "*.deb"
     
+    # Upload to AWS S3
+    - name: Configure AWS Credentials
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: us-east-1 # Change to your region
+
+    - name: Upload Installer to S3 (Windows)
+      if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'windows-latest'
+      run: aws s3 cp installer/Output/InkifySetup.exe s3://inkify-installers/windows/InkifySetup.exe
+       
+    - name: Upload Installer to S3 (macOS)
+      if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'macos-latest'
+      run: aws s3 cp InkifyAgent_v1.0.0.pkg s3://inkify-installers/mac/InkifyAgent.pkg      
+    
+    - name: Upload Installer to S3 (Linux)
+      if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'ubuntu-latest'
+      run: aws s3 cp inkify-agent_1.0.0_amd64.deb s3://inkify-installers/linux/inkify-agent.deb
+
+    # Create GitHub Release
+    - name: Release to GitHub (Windows)
+      if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'windows-latest' 
+      uses: softprops/action-gh-release@v1
+      with:
+        files: installer/Output/InkifySetup.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Release to GitHub (macOS)
+      if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'macos-latest' 
+      uses: softprops/action-gh-release@v1
+      with:
+        files: "*.pkg"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Release to GitHub (Linux)
+      if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'ubuntu-latest' 
+      uses: softprops/action-gh-release@v1
+      with:
+        files: "*.deb"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
