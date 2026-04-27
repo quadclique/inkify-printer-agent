@@ -154,9 +154,17 @@ class JobService:
             self._fail_job(str(job.job_id), "Failed to prepare file for printing.")
             return
 
+        # Explicitly move to printing folder before dispatching
+        printing_path = self.storage_service.transition_job_file(
+            download_path.name, "ready", "printing"
+        )
+        if not printing_path:
+            self._fail_job(str(job.job_id), "Failed to move file to printing directory.")
+            return
+
         # Notify cloud we are printing
         self._update_db_status(str(job.job_id), "printing")
-        self._update_db_filepath(str(job.job_id), str(ready_path))
+        self._update_db_filepath(str(job.job_id), str(printing_path))
         
         success = self.api_client.update_job_status(str(job.job_id), "printing")
 
@@ -175,7 +183,7 @@ class JobService:
             
         # Dispatch to physical printer
         self.printer_service.dispatch_job(
-            str(job.job_id), str(job.printer_id), ready_path, job.copies, job.is_color, on_success=on_print_success, on_failure=on_print_failure
+            str(job.job_id), str(job.printer_id), printing_path, job.copies, job.is_color, on_success=on_print_success, on_failure=on_print_failure
         )
 
 
@@ -217,13 +225,34 @@ class JobService:
         """Marks a job as failed locally and in the cloud."""
         logger.error(f"Job {job_id} failed: {reason}")
         self._update_db_status(job_id, "failed")
-        self.api_client.update_job_status(job_id, "failed", details=reason)
-
+        
+        try:
+            # This will retry 3 times, then raise an Exception if the network is dead
+            success = self.api_client.update_job_status(job_id, "failed", details=reason)
+        except Exception as e:
+            logger.warning(f"Network offline. Deferring failure status to offline queue.")
+            success = False # Force success to False so the queue triggers
+        
+        if not success:
+            self.queue_service.enqueue_event(
+                job_id, "status_update", {"status": "failed", "details": reason}
+            )
+            
     def _complete_job(self, job_id: str) -> None:
         """Marks a job as completely successful locally and in the cloud."""
         logger.info(f"Job {job_id} completed successfully.")
         self._update_db_status(job_id, "completed")
-        self.api_client.update_job_status(job_id, "completed")
+        try: 
+            # This will retry 3 times, then raise an Exception if the network is dead
+            success = self.api_client.update_job_status(job_id, "completed")
+        except Exception as e:
+            logger.warning(f"Network offline. Deferring completion status to offline queue.")
+            success = False # Force success to False so the queue triggers
+
+        if not success:
+            self.queue_service.enqueue_event(
+                job_id, "status_update", {"status": "completed"}
+            )
 
     def shutdown(self) -> None:
         """

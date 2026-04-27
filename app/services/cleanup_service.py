@@ -24,11 +24,15 @@ class CleanupService:
             f"Starting routine cleanup (Retention: {self.retention_days} days)..."
         )
 
-        # 1. Clean up old physical files
+        # 1. Clean up old PDF jobs
         self._cleanup_directory(config.JOB_COMPLETED_DIR)
         self._cleanup_directory(config.JOB_FAILED_DIR)
 
-        # 2. Clean up old database records
+        # 2. Clean up old offline queue JSON files
+        self._cleanup_directory(config.QUEUE_COMPLETED_DIR)
+        self._cleanup_directory(config.QUEUE_FAILED_DIR)
+
+        # 3. Clean up old SQLite database records
         self._cleanup_database()
 
         logger.info("Routine cleanup completed.")

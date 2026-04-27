@@ -37,7 +37,7 @@ class PrinterService:
         printers = self.get_available_printers()
         for p in printers:
             if p["name"] == printer_name:
-                return p["status"] == "idle"
+                return p["status"] in ["idle", "printing"]
         logger.warning(f"Printer '{printer_name}' not found or not ready.")
         return False
 
@@ -57,33 +57,30 @@ class PrinterService:
         """
         if not file_path.exists():
             logger.error(f"Cannot print job {job_id}: File not found at {file_path}")
+            if on_failure: on_failure("File missing from disk.")
             return False
         
         printer_name = self.get_printer_name_by_cloud_uuid(cloud_printer_uuid)
 
         if not printer_name:
             logger.error(f"Cannot dispatch job: Unknown Cloud UUID '{cloud_printer_uuid}'. Is the printer mapped?")
+            if on_failure: on_failure("Printer not mapped locally.")
             return False
         
         if not self.is_printer_ready(printer_name):
             logger.error(
                 f"Cannot dispatch job {job_id}: Printer '{printer_name}' is offline."
             )
+            if on_failure: on_failure("Physical printer is offline or jammed.")
             return False
 
         try:
             logger.info(f"Dispatching job {job_id} to printer {printer_name}...")
 
-            # Move file to 'printing' directory
-            printing_path = self.storage_service.transition_job_file(file_path.name, "ready", "printing")
-
-            if not printing_path:
-                raise Exception("Failed to transition file to printing directory.")
-            
             # OS Level Print Command
             success_job_id = self.printer_manager.print_file_async(
                 printer_name=printer_name,
-                file_path=str(printing_path),
+                file_path=str(file_path),
                 title=f"Inkify_{job_id}",
                 copies=copies,
                 is_color=is_color,
@@ -95,23 +92,14 @@ class PrinterService:
                 logger.info(
                     f"Successfully sent job {job_id} to {printer_name} (OS Job ID: {success_job_id})"
                 )
-
-                # Move to completed directory
-                completed_path = config.JOB_COMPLETED_DIR / file_path.name
-                os.rename(printing_path, completed_path)
                 return True
             else:
-                raise Exception("OS rejected the print command.")
+                return False
 
         except Exception as e:
-            logger.error(f"Failed to print job {job_id}: {e}")
-
-            # Move to failed directory so it isn't lost, but isn't stuck in processing
-            if "printing_path" in locals() and printing_path.exists():
-                failed_path = config.JOB_FAILED_DIR / file_path.name
-                os.rename(printing_path, failed_path)
+            logger.error(f"Failed to submit print job {job_id} to printer service: {e}")
             if on_failure:
-                on_failure(str(e))
+                on_failure(f"Internal wrapper error: {str(e)}")
                 
             return False
 

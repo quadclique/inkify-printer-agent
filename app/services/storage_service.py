@@ -24,6 +24,14 @@ class StorageService:
             "failed": config.JOB_FAILED_DIR,
         }
 
+        # Map logical states to physical directories for offline Queue JSONs
+        self.queue_dirs = {
+            "pending": config.QUEUE_PENDING_DIR,
+            "processing": config.QUEUE_PROCESSING_DIR,
+            "completed": config.QUEUE_COMPLETED_DIR,
+            "failed": config.QUEUE_FAILED_DIR,
+        }
+
     def verify_download(self, file_path: Path, expected_hash: str) -> bool:
         """
         Compares the local file's hash against the cloud's expected hash.
@@ -71,7 +79,34 @@ class StorageService:
             return None
 
         logger.debug(f"Moving {filename}: [{from_state}] -> [{to_state}]")
+        logger.info(f"📂 FILE MOVED: {filename} [{from_state.upper()}] ➔ [{to_state.upper()}]")
+        if safe_move(source_path, dest_path):
+            return dest_path
+        return None
 
+    def transition_queue_file(self, filename: str, from_state: str, to_state: str) -> Optional[Path]:
+        """
+        Moves an offline queue JSON file between lifecycle directories.
+        Fails silently if the file is missing (meaning another thread already grabbed the lock).
+        """
+        source_dir = self.queue_dirs.get(from_state)
+        dest_dir = self.queue_dirs.get(to_state)
+
+        if not source_dir or not dest_dir:
+            logger.error(f"Invalid queue state transition requested: {from_state} -> {to_state}")
+            return None
+
+        source_path = source_dir / filename
+        dest_path = dest_dir / filename
+
+        # If the file isn't there, another thread already locked it. This is expected.
+        if not source_path.exists():
+            return None
+
+        # Determine icon based on transition
+        icon = "🔄" if to_state == "processing" else "✅" if to_state == "completed" else "❌" if to_state == "failed" else "⏳"
+        logger.info(f"{icon} QUEUE EVENT: {filename} [{from_state.upper()}] ➔ [{to_state.upper()}]")
+        
         if safe_move(source_path, dest_path):
             return dest_path
         return None

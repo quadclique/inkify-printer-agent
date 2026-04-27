@@ -35,7 +35,7 @@ class PrinterAgent:
         self.storage_service = StorageService()
 
         # Inject the shared API Client
-        self.queue_service = QueueService(self.api_client)
+        self.queue_service = QueueService(self.api_client, self.storage_service)
         self.pairing_service = PairingService(self.api_client, self.agent_repo)
         self.printer_service = PrinterService(self.api_client,self.printer_manager,self.printer_repo, self.storage_service)
         self.heartbeat_service = HeartbeatService(self.api_client, self.printer_service)
