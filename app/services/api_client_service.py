@@ -91,20 +91,6 @@ class APIClientService:
         """Sends the periodic heartbeat to let the backend know the agent is alive."""
         response = self._request("POST", f"/agent/heartbeat", json=agent_status)
         return response is not None
-
-    # def fetch_pending_jobs(self) -> List[Dict[str, Any]]:
-    #     """Polls the backend for new print jobs assigned to this agent."""
-    #     """GET /agent/{agent_id}/jobs/pending"""
-    #     response = self._request("GET", f"/agent/jobs/pending")
-        
-    #     # If FastAPI returns a raw list: [ {job1}, {job2} ]
-    #     if isinstance(response, list):
-    #         return response
-            
-    #     # If the backend returns a dict: {"jobs": [ {job1}, {job2} ]}
-    #     if response and isinstance(response, dict) and "jobs" in response:
-    #         return response.get("jobs", [])
-    #     return []
     
     def pull_next_job(self) -> Optional[Dict[str, Any]]:
         """
@@ -151,21 +137,6 @@ class APIClientService:
         except Exception as e:
             logger.error(f"Failed to download document from {url}: {e}")
             return False
-    # def download_job_file(self, document_id: str, destination_path: str) -> bool:
-    #     """Downloads the actual print payload (PDF/image) to the local disk."""
-    #     url = f"{self.base_url}/documents/{document_id}/download"
-    #     try:
-    #         with self.session.get(
-    #             url, stream=True, timeout=config.API_TIMEOUT_DOWNLOAD
-    #         ) as r:
-    #             r.raise_for_status()
-    #             with open(destination_path, "wb") as f:
-    #                 for chunk in r.iter_content(chunk_size=config.FILE_CHUNK_SIZE):
-    #                     f.write(chunk)
-    #         return True
-    #     except Exception as e:
-    #         logger.error(f"Failed to download document {document_id}: {e}")
-    #         return False
 
     def get_job_details(self, job_id: str) -> Optional[Dict[str, Any]]:
         """Fetches the current truth from the cloud for a specific job."""

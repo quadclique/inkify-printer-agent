@@ -110,14 +110,23 @@ class PrinterService:
             return
         
         local_printers = self.get_available_printers() 
+        existing_map = self.printer_repo.get_printer_map()
         
         # Format for API: List of dicts with name and capabilities
         payload = []
         for p in local_printers:
+            if p["connection_type"] == "network":
+                logger.debug(f"Detected Network Printer: {p['name']} (Sig: {p['hardware_signature']})")
+            elif p["connection_type"] == "usb":
+                logger.debug(f"Detected USB Printer: {p['name']}. Ready for secure handshake.")
+            
             payload.append({
                 "name": p["name"],
                 "hardware_id": p["name"],  # For CUPS, the queue name is the hardware ID
+                "hardware_signature": p["hardware_signature"],
                 "is_online": p["status"] in ["idle", "printing"],
+                "connection_type": p["connection_type"], 
+                "device_uri": p["device_uri"],
                 "supports_color": p.get("supports_color", False),
                 "supports_duplex": p.get("supports_duplex", False)
             })
@@ -129,12 +138,27 @@ class PrinterService:
             # Handle if backend wraps in "printers" key or returns direct map
             cloud_map = response.get("printers", response) if "printers" in response else response
             self.printer_repo.save_printer_map(cloud_map)
-            logger.info(f"Synced {len(cloud_map)} printers.")
+            logger.info(f"Synced {len(cloud_map)} printers. Routing map updated.")
             
     def check_for_hardware_changes(self):
-        """Point 11: Auto-discovery check"""
+        """Auto-discovery check"""
         current_local = self.printer_manager.get_printers()
-        # If hardware count changed, trigger sync
-        if len(current_local) != len(self.printer_repo.get_printer_map()):
-            logger.info("New hardware detected. Re-syncing...")
+        saved_map = self.printer_repo.get_printer_map()
+        
+        needs_sync = False
+        
+        # Trigger sync if the count changes OR if a connection type changes
+        if len(current_local) != len(saved_map):
+            # printers total count changing
+            needs_sync = True
+        else:
+            # printer jumped from USB to Wi-Fi without the total count changing.
+            current_os_names = {p["name"] for p in current_local}
+            saved_os_names = set(saved_map.keys())
+            
+            if current_os_names != saved_os_names:
+                needs_sync = True
+        
+        if needs_sync:
+            logger.info("Hardware environment changed. Triggering cloud sync...")
             self.sync_printers_with_cloud()

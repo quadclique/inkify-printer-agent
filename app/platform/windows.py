@@ -1,7 +1,9 @@
 import os
 import time
+import json
 import logging
 import threading
+import subprocess
 from typing import List, Dict, Optional, Callable
 from app.platform.base import BasePrinterManager
 
@@ -9,29 +11,99 @@ logger = logging.getLogger(__name__)
 
 class WindowsPrinterManager(BasePrinterManager):
     """Windows Spooler implementation."""
-    
+
     def get_printers(self) -> List[Dict[str, str]]:
+        """
+        Queries Windows for available printers using WMI via PowerShell.
+        This provides the necessary PortName and PNPDeviceID for hardware matching.
+        """
         printers = []
         try:
-            import win32print  # type: ignore
-            # EnumPrinters(2) gets local and mapped printers
-            flags = win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS
-            for p in win32print.EnumPrinters(flags):
-                printer_name = p[2]
-                printers.append({
-                    "id": printer_name,
-                    "name": printer_name,
-                    "status": "idle", # Deep status polling requires OpenPrinter on Windows
-                    "raw_status": "Ready",
-                    "supports_color": True,   
-                    "supports_duplex": False,
-                })
+            # 1. Use WMI via PowerShell to get detailed printer data
+            # PortName helps identify USB vs Network. PNPDeviceID contains hardware signatures.
+            cmd = [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "Get-WmiObject -Class Win32_Printer | Select-Object Name, PrinterStatus, PortName, PNPDeviceID, Network | ConvertTo-Json -Compress",
+            ]
+            
+            # Use creationflags=subprocess.CREATE_NO_WINDOW to prevent popup flashes on Windows
+            creationflags = 0
+            if os.name == 'nt':
+                creationflags = subprocess.CREATE_NO_WINDOW
+                
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True, creationflags=creationflags)
+
+            output = result.stdout.strip()
+            if not output:
+                logger.warning("WMI query returned empty output.")    
+                return []        
+
+            # PowerShell might return a single object or an array
+            wmi_printers = json.loads(output)
+            if not isinstance(wmi_printers, list):
+                wmi_printers = [wmi_printers]
+
+            for p in wmi_printers:
+                printer_name = p.get("Name")
+                if not printer_name:
+                    continue
+                
+                port_name = p.get("PortName", "").upper()
+                pnp_id = p.get("PNPDeviceID", "")
+                is_network = p.get("Network", False)
+
+                # 2. Determine Connection Type
+                if (
+                    is_network
+                    or port_name.startswith("IP_")
+                    or port_name.startswith("WSD-")
+                    or port_name.startswith("TCP")
+                ):
+                    connection_type = "network"
+                elif port_name.startswith("USB") or port_name.startswith("DOT4"):
+                    connection_type = "usb"
+                else:
+                    connection_type = "unknown"
+
+                # 3. Determine Hardware Signature
+                # Use the PNPDeviceID (Plug and Play ID) as the hardware signature (contains VID/PID and serials) for USB devices.
+                # If missing (often true for pure network printers initially), fallback to the printer name.
+                hardware_signature = pnp_id if pnp_id else printer_name
+
+                # 4. Map WMI PrinterStatus codes to basic statuses
+                # WMI Codes: 3 = Idle, 4 = Printing, 1 = Other, 2 = Unknown, 5 = Warming Up, 6 = Stopped, 7 = Offline                status_code = p.get("PrinterStatus", 3)
+                status_code = p.get("PrinterStatus", 3)
+                if status_code == 3:
+                    status = "idle"
+                elif status_code == 4:
+                    status = "printing"
+                else:
+                    status = "offline"
+                    
+                printers.append(
+                    {
+                        "id": printer_name,
+                        "name": printer_name,
+                        "status": status,
+                        "raw_status": f"WMI_Code_{status_code}",
+                        "connection_type": connection_type,
+                        "device_uri": port_name,
+                        "hardware_signature": hardware_signature, # Deep querying requires DeviceCapabilities via pywin32
+                        "supports_color": True,
+                        "supports_duplex": False,
+                    }
+                )
             return printers
-        except ImportError:
-            logger.error("pywin32 is not installed. Run: pip install pywin32")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"PowerShell command failed: {e.stderr}")
+            return []
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse WMI JSON output: {e}")
             return []
         except Exception as e:
-            logger.error(f"Failed to query Windows printers: {e}")
+            logger.error(f"Failed to query Windows WMI printers: {e}")
             return []
 
     def get_printer_capabilities(self, printer_name: str) -> Dict[str, bool]:
@@ -57,9 +129,8 @@ class WindowsPrinterManager(BasePrinterManager):
             win32print.SetDefaultPrinter(printer_name)
 
             for _ in range(copies):
-                # FIXED: Passed "" instead of None for the parameters argument
                 win32api.ShellExecute(0, "print", abs_path, "", ".", 0)
-                time.sleep(1) # Give spooler time to ingest
+                time.sleep(1)  # Give spooler time to ingest
                 
             # Restore default
             win32print.SetDefaultPrinter(old_default)
@@ -69,6 +140,12 @@ class WindowsPrinterManager(BasePrinterManager):
             monitor_thread.start()
             
             return job_id
+        
+        except ImportError:
+            error_msg = "pywin32 is required for printing on Windows. Run: pip install pywin32"
+            logger.error(error_msg)
+            if on_failure: on_failure(error_msg)
+            return None
         except Exception as e:
             error_msg = f"Windows ShellExecute failed: {e}"
             logger.error(error_msg)

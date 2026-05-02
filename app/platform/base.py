@@ -6,7 +6,11 @@ class BasePrinterManager(abc.ABC):
 
     @abc.abstractmethod
     def get_printers(self) -> List[Dict[str, str]]:
-        """Returns a list of available printers and their statuses."""
+        """
+        Returns a list of available printers and their statuses.
+        Must include: 'name', 'status', 'connection_type' (usb|network|unknown), 
+        and 'hardware_signature' (a unique string to identify the physical device).
+        """
         pass
 
     @abc.abstractmethod

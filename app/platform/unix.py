@@ -1,6 +1,7 @@
 import subprocess
 import logging
 import time
+import urllib.parse
 import threading
 from typing import List, Dict, Optional, Callable
 from app.platform.base import BasePrinterManager
@@ -22,11 +23,22 @@ class UnixPrinterManager(BasePrinterManager):
         """
         printers = []
         try:
-            # Run the lpstat command and capture the output
-            result = subprocess.run(
+            # 1. Get URIs (lpstat -v outputs: "device for PrinterName: usb://...")
+            uri_result = subprocess.run(["lpstat", "-v"], capture_output=True, text=True, check=True)
+            uri_map = {}
+            for line in uri_result.stdout.splitlines():
+                if line.startswith("device for"):
+                    parts = line.split(":", 1) # Split only on the first colon
+                    if len(parts) == 2:
+                        name = parts[0].replace("device for ", "").strip()
+                        uri = parts[1].strip()
+                        uri_map[name] = uri
+            
+            # # 2. Get Statuses (lpstat -p) 
+            status_result = subprocess.run(
                 ["lpstat", "-p"], capture_output=True, text=True, check=True
             )
-            lines = result.stdout.splitlines()
+            lines = status_result.stdout.splitlines()
 
             for line in lines:
                 if line.startswith("printer"):
@@ -43,7 +55,26 @@ class UnixPrinterManager(BasePrinterManager):
                             status = "printing"
                         else:
                             status = "offline"
+                        
+                        uri = uri_map.get(printer_name, "")
+                        
+                        # 3. Extract Connection Type & Hardware Signature
+                        connection_type = "unknown"
+                        hardware_signature = printer_name # Fallback
+                        
+                        if uri.startswith("usb"):
+                            connection_type = "usb"
+                        elif uri.startswith(("socket", "ipp", "http", "dnssd", "lpd")):
+                            connection_type = "network"
 
+                        # Parse the URI to find serial numbers (e.g., usb://HP/LaserJet?serial=12345)
+                        parsed_uri = urllib.parse.urlparse(uri)
+                        query_params = urllib.parse.parse_qs(parsed_uri.query)
+                        
+                        if "serial" in query_params:
+                            hardware_signature = query_params["serial"][0]
+                        elif "uuid" in query_params:
+                            hardware_signature = query_params["uuid"][0]
                         caps = self.get_printer_capabilities(printer_name)
 
                         printers.append(
@@ -52,6 +83,9 @@ class UnixPrinterManager(BasePrinterManager):
                                 "name": printer_name,
                                 "status": status,
                                 "raw_status": status_str,
+                                "connection_type": connection_type,
+                                "device_uri": uri,
+                                "hardware_signature": hardware_signature,
                                 "supports_color": caps["supports_color"],
                                 "supports_duplex": caps["supports_duplex"],
                             }
