@@ -115,6 +115,8 @@ jobs:
     needs: build # This forces the release job to wait until all 3 OS builds are done
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
   
     # Download all the artifacts
     steps:
