@@ -101,7 +101,7 @@ CLEANUP_INTERVAL_SECONDS=86400
 To test the agent in the foreground without installing it as a background service:
 
 ```bash
-python app/main.py --token "your_24_hour_test_token"
+python main.py --token "your_24_hour_test_token"
 ```
 (Alternatively, use the provided helper script:
 ```bash
@@ -172,8 +172,8 @@ Tag pushed to GitHub
 ## 📂 Repository Structure
 ```
 inkify-agent/
+├── main.py                       # Entry point — token extraction and bootstrap
 ├── app/                          # Core Python application 
-│   ├── main.py                   # Entry point — token extraction and bootstrap
 │   ├── agent_lifecycle.py        # Main polling and telemetry loop
 │   ├── services/                 # Cloud sync, job processing, and print dispatch
 │   └── platform/                 # OS-specific spooler managers (Win32 / CUPS)

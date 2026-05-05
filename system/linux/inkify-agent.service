@@ -15,7 +15,7 @@ WorkingDirectory=/opt/inkify
 # Environment="PATH={{WORKING_DIR}}/.venv/bin:/usr/bin:/usr/local/bin"
 
 # Start the application using the Python binary inside the virtual environment
-# ExecStart={{WORKING_DIR}}/.venv/bin/python app/main.py
+# ExecStart={{WORKING_DIR}}/.venv/bin/python main.py
 
 # Execute the standalone binary directly
 ExecStart=/opt/inkify/inkify-agent

@@ -55,9 +55,7 @@ class PrinterAgent:
         # is_paired = self.pairing_service.ensure_paired(registration_token)
         agent_config = self.agent_repo.get_config()
         if not agent_config or not agent_config.agent_token:
-            # logger.critical(
-            #     "Agent is not authenticated. Please run the agent with: python app/main.py --token <your_token>"
-            # )
+            #     "Agent is not authenticated. Please run the agent with: python main.py --token <your_token>"
             logger.critical(
                 "Agent is not authenticated. The background service cannot start. "
                 "Please run the installer to pair the device."

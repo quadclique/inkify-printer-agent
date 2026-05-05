@@ -42,7 +42,7 @@ jobs:
       if: matrix.os == 'windows-latest'
       run: | 
         pip install pywin32
-        pyinstaller --name inkify-agent --onefile --hidden-import win32timezone app/main.py
+        pyinstaller --name inkify-agent --onefile --hidden-import win32timezone main.py
 
     # Package the executable into an installer using Inno Setup (CI - Runs on Branches & Tags)
     - name: Package Windows Installer (Inno Setup)
@@ -69,7 +69,7 @@ jobs:
     # Build Binary files (CI - Runs on Branches & Tags)
     - name: Build macOS Binary Executable file
       if: matrix.os == 'macos-latest'
-      run: pyinstaller --name inkify-agent --onefile app/main.py
+      run: pyinstaller --name inkify-agent --onefile main.py
 
     # Package the executable into a .pkg installer using a shell script (CI - Runs on Branches & Tags)
     - name: Package macOS Installer (.pkg)
@@ -88,9 +88,9 @@ jobs:
 
     # Linux Build (Binary + Installer)
     # Build Binary files (CI - Runs on Branches & Tags)
-    - name: Build Linux Binary
+    - name: Build Linux Binary Executable file
       if: matrix.os == 'ubuntu-latest'
-      run: pyinstaller --name inkify-agent --onefile app/main.py
+      run: pyinstaller --name inkify-agent --onefile main.py
 
     # Package the executable into a .deb installer using a shell script (CI - Runs on Branches & Tags)
     - name: Package Linux Installer (.deb)

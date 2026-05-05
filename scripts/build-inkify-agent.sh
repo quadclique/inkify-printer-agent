@@ -8,6 +8,6 @@ source .venv/bin/activate
 pip install pyinstaller
 
 # Build into a single binary, cleaning previous builds
-pyinstaller --name inkify-agent --onefile --clean app/main.py
+pyinstaller --name inkify-agent --onefile --clean main.py
 
 echo "Build complete! Executable is located in the dist/ folder."

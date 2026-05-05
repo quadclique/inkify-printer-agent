@@ -14,4 +14,4 @@ else
     exit 1
 fi
 
-python app/main.py
+python main.py
