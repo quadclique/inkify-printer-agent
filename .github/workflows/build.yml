@@ -60,7 +60,7 @@ jobs:
     # Upload to Github Artifacts (CI - Runs on Branches & Tags)
     - name: Upload Windows Installer
       if: matrix.os == 'windows-latest'
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: InkifySetup
         path: installer/Output/*.exe
@@ -81,7 +81,7 @@ jobs:
     # Upload to Github Artifacts (CI - Runs on Branches & Tags)
     - name: Upload macOS Installer
       if: matrix.os == 'macos-latest'
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: InkifyAgentPkg
         path: "*.pkg"
@@ -102,7 +102,7 @@ jobs:
       # Upload to Github Artifacts (CI - Runs on Branches & Tags)
     - name: Upload Linux Installer
       if: matrix.os == 'ubuntu-latest'
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: InkifyAgentDeb
         path: "*.deb"
@@ -118,7 +118,7 @@ jobs:
     # Download all the artifacts
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: final-release-files
       - name: Set Deployment Variables
