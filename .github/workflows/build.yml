@@ -6,6 +6,10 @@ on:
     tags: [ "v*" ] # Triggers the pipeline when you push a version tag (e.g., v1.0.0)
   workflow_dispatch: # Allows you to run it manually from the GitHub UI
 
+env:
+  AWS_REGION: ap-south-1
+  S3_BUCKET: inkify-installers
+
 jobs:
   build:
     name: Build on ${{ matrix.os }}
@@ -24,6 +28,7 @@ jobs:
       uses: actions/setup-python@v4
       with:
         python-version: '3.11'
+        cache : 'pip'
 
     - name: Install Base Dependencies
       run: |
@@ -67,14 +72,14 @@ jobs:
       run: pyinstaller --name inkify-agent --onefile app/main.py
 
     # Package the executable into a .pkg installer using a shell script (CI - Runs on Branches & Tags)
-    - name: Package Mac Installer (.pkg)
+    - name: Package macOS Installer (.pkg)
       if: matrix.os == 'macos-latest'
       run: |
         chmod +x scripts/build-mac-pkg.sh
         ./scripts/build-mac-pkg.sh
 
     # Upload to Github Artifacts (CI - Runs on Branches & Tags)
-    - name: Upload Mac Installer
+    - name: Upload macOS Installer
       if: matrix.os == 'macos-latest'
       uses: actions/upload-artifact@v3
       with:
@@ -102,73 +107,58 @@ jobs:
         name: InkifyAgentDeb
         path: "*.deb"
     
-    # Upload to AWS S3 
+    # Upload to AWS S3 & Release to Github
     # Determine S3 routing (CD - ONLY runs on Tags)
-    - name: Set Deployment Variables
-      if: startsWith(github.ref, 'refs/tags/')
-      id: set-env
-      shell: bash
-      run: |
-        # If the tag contains '-beta' (e.g., v1.1.0-beta)
-        if [[ "${{ github.ref }}" == *-beta* ]]; then
-          echo "S3_PREFIX=beta/" >> $GITHUB_ENV
-          echo "IS_PRERELEASE=true" >> $GITHUB_ENV
-        # If it is a stable production tag (e.g., v1.1.0)
-        else
-          echo "S3_PREFIX=releases/" >> $GITHUB_ENV
-          echo "IS_PRERELEASE=false" >> $GITHUB_ENV
-        fi
-    - name: Configure AWS Credentials
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: aws-actions/configure-aws-credentials@v2
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: us-east-1 # Change to your region
+  release:
+    name: Deploy to S3 and Release to Github
+    needs: build # This forces the release job to wait until all 3 OS builds are done
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+  
+    # Download all the artifacts
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: final-release-files
+      - name: Set Deployment Variables
+        id: set-env
+        shell: bash
+        run: |
+          # If the tag contains '-beta' (e.g., v1.1.0-beta)
+          if [[ "${{ github.ref }}" == *-beta* ]]; then
+            echo "S3_PREFIX=beta/" >> $GITHUB_ENV
+            echo "IS_PRERELEASE=true" >> $GITHUB_ENV
+          # If it is a stable production tag (e.g., v1.1.0)
+          else
+            echo "S3_PREFIX=releases/" >> $GITHUB_ENV
+            echo "IS_PRERELEASE=false" >> $GITHUB_ENV
+          fi
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    # Upload (CD - ONLY runs on Tags)
-    - name: Upload Installer to S3 (Windows)
-      if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'windows-latest'
-      run: aws s3 cp installer/Output/InkifySetup.exe s3://inkify-installers/${{ env.S3_PREFIX }}windows/InkifySetup.exe
-       
-    - name: Upload Installer to S3 (macOS)
-      if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'macos-latest'
-      run: aws s3 cp *.pkg s3://inkify-installers/${{ env.S3_PREFIX }}mac/InkifyAgent.pkg      
-    
-    - name: Upload Installer to S3 (Linux)
-      if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'ubuntu-latest'
-      run: aws s3 cp *.deb s3://inkify-installers/${{ env.S3_PREFIX }}linux/inkify-agent.deb
+      # Upload (CD - ONLY runs on Tags)
+      - name: Upload Installer to S3 (Windows, macOS, Linux)
+        shell: bash
+        run: |
+          # Upload Windows Installer to S3 
+          aws s3 cp final-release-files/InkifySetup/InkifySetup.exe s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}windows/${{ github.ref_name }}/InkifySetup.exe
+          
+          # Upload macOS Installer to S3 
+          aws s3 cp final-release-files/InkifyAgentPkg/*.pkg s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}mac/${{ github.ref_name }}/InkifyAgent.pkg      
+          
+          # Upload Linux Installer to S3 
+          aws s3 cp final-release-files/InkifyAgentDeb/*.deb s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}linux/${{ github.ref_name }}/inkify-agent.deb
 
-    # Create GitHub Release (CD - ONLY runs on Tags)
-    - name: Release to GitHub (Windows)
-      if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'windows-latest' 
-      uses: softprops/action-gh-release@v1
-      with:
-        # Attaches Windows executable to the release
-        files: installer/Output/InkifySetup.exe
-        # Dynamically sets it as a pre-release if it's a beta tag
-        prerelease: ${{ env.IS_PRERELEASE }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    
-    - name: Release to GitHub (macOS)
-      if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'macos-latest' 
-      uses: softprops/action-gh-release@v1
-      with:
-        # Attaches macOS executable to the release
-        files: "*.pkg"
-        # Dynamically sets it as a pre-release if it's a beta tag
-        prerelease: ${{ env.IS_PRERELEASE }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Release to GitHub (Linux)
-      if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'ubuntu-latest' 
-      uses: softprops/action-gh-release@v1
-      with:
-        # Attaches linux executable to the release
-        files: "*.deb"
-        # Dynamically sets it as a pre-release if it's a beta tag
-        prerelease: ${{ env.IS_PRERELEASE }}
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Create GitHub Release (CD - ONLY runs on Tags)
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: final-release-files/**/* # Grabs every file downloaded
+          prerelease: ${{ env.IS_PRERELEASE }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
