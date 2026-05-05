@@ -47,6 +47,7 @@ jobs:
     # Package the executable into an installer using Inno Setup (CI - Runs on Branches & Tags)
     - name: Package Windows Installer (Inno Setup)
       if: matrix.os == 'windows-latest'
+      shell: cmd
       run: |
         mkdir installer
         copy dist\inkify-agent.exe installer\
