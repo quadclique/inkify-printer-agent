@@ -32,14 +32,14 @@ jobs:
         pip install pyinstaller
 
     # Windows Build (Binary + Installer)
-    # Build Binary files 
+    # Build Binary files (CI - Runs on Branches & Tags)
     - name:  Windows Specific Dependencies and Build Windows Binary Executable file
       if: matrix.os == 'windows-latest'
       run: | 
         pip install pywin32
         pyinstaller --name inkify-agent --onefile --hidden-import win32timezone app/main.py
 
-    # Package the executable into an installer using Inno Setup
+    # Package the executable into an installer using Inno Setup (CI - Runs on Branches & Tags)
     - name: Package Windows Installer (Inno Setup)
       if: matrix.os == 'windows-latest'
       run: |
@@ -52,6 +52,7 @@ jobs:
         cd installer
         "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" setup.iss
 
+    # Upload to Github Artifacts (CI - Runs on Branches & Tags)
     - name: Upload Windows Installer
       if: matrix.os == 'windows-latest'
       uses: actions/upload-artifact@v3
@@ -60,18 +61,19 @@ jobs:
         path: installer/Output/*.exe
 
     # macOS Build (Binary + Installer)
-    # Build Binary files
+    # Build Binary files (CI - Runs on Branches & Tags)
     - name: Build macOS Binary Executable file
       if: matrix.os == 'macos-latest'
       run: pyinstaller --name inkify-agent --onefile app/main.py
 
-    # Package the executable into a .pkg installer using a shell script
+    # Package the executable into a .pkg installer using a shell script (CI - Runs on Branches & Tags)
     - name: Package Mac Installer (.pkg)
       if: matrix.os == 'macos-latest'
       run: |
         chmod +x scripts/build-mac-pkg.sh
         ./scripts/build-mac-pkg.sh
 
+    # Upload to Github Artifacts (CI - Runs on Branches & Tags)
     - name: Upload Mac Installer
       if: matrix.os == 'macos-latest'
       uses: actions/upload-artifact@v3
@@ -80,18 +82,19 @@ jobs:
         path: "*.pkg"
 
     # Linux Build (Binary + Installer)
-    # Build Binary files
+    # Build Binary files (CI - Runs on Branches & Tags)
     - name: Build Linux Binary
       if: matrix.os == 'ubuntu-latest'
       run: pyinstaller --name inkify-agent --onefile app/main.py
 
-    # Package the executable into a .deb installer using a shell script
+    # Package the executable into a .deb installer using a shell script (CI - Runs on Branches & Tags)
     - name: Package Linux Installer (.deb)
       if: matrix.os == 'ubuntu-latest'
       run: |
         chmod +x scripts/build-linux-deb.sh
         ./scripts/build-linux-deb.sh
-
+        
+      # Upload to Github Artifacts (CI - Runs on Branches & Tags)
     - name: Upload Linux Installer
       if: matrix.os == 'ubuntu-latest'
       uses: actions/upload-artifact@v3
@@ -99,7 +102,22 @@ jobs:
         name: InkifyAgentDeb
         path: "*.deb"
     
-    # Upload to AWS S3
+    # Upload to AWS S3 
+    # Determine S3 routing (CD - ONLY runs on Tags)
+    - name: Set Deployment Variables
+      if: startsWith(github.ref, 'refs/tags/')
+      id: set-env
+      shell: bash
+      run: |
+        # If the tag contains '-beta' (e.g., v1.1.0-beta)
+        if [[ "${{ github.ref }}" == *-beta* ]]; then
+          echo "S3_PREFIX=beta/" >> $GITHUB_ENV
+          echo "IS_PRERELEASE=true" >> $GITHUB_ENV
+        # If it is a stable production tag (e.g., v1.1.0)
+        else
+          echo "S3_PREFIX=releases/" >> $GITHUB_ENV
+          echo "IS_PRERELEASE=false" >> $GITHUB_ENV
+        fi
     - name: Configure AWS Credentials
       if: startsWith(github.ref, 'refs/tags/')
       uses: aws-actions/configure-aws-credentials@v2
@@ -108,24 +126,28 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: us-east-1 # Change to your region
 
+    # Upload (CD - ONLY runs on Tags)
     - name: Upload Installer to S3 (Windows)
       if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'windows-latest'
-      run: aws s3 cp installer/Output/InkifySetup.exe s3://inkify-installers/windows/InkifySetup.exe
+      run: aws s3 cp installer/Output/InkifySetup.exe s3://inkify-installers/${{ env.S3_PREFIX }}windows/InkifySetup.exe
        
     - name: Upload Installer to S3 (macOS)
       if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'macos-latest'
-      run: aws s3 cp InkifyAgent_v1.0.0.pkg s3://inkify-installers/mac/InkifyAgent.pkg      
+      run: aws s3 cp *.pkg s3://inkify-installers/${{ env.S3_PREFIX }}mac/InkifyAgent.pkg      
     
     - name: Upload Installer to S3 (Linux)
       if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'ubuntu-latest'
-      run: aws s3 cp inkify-agent_1.0.0_amd64.deb s3://inkify-installers/linux/inkify-agent.deb
+      run: aws s3 cp *.deb s3://inkify-installers/${{ env.S3_PREFIX }}linux/inkify-agent.deb
 
-    # Create GitHub Release
+    # Create GitHub Release (CD - ONLY runs on Tags)
     - name: Release to GitHub (Windows)
       if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'windows-latest' 
       uses: softprops/action-gh-release@v1
       with:
+        # Attaches Windows executable to the release
         files: installer/Output/InkifySetup.exe
+        # Dynamically sets it as a pre-release if it's a beta tag
+        prerelease: ${{ env.IS_PRERELEASE }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
@@ -133,7 +155,10 @@ jobs:
       if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'macos-latest' 
       uses: softprops/action-gh-release@v1
       with:
+        # Attaches macOS executable to the release
         files: "*.pkg"
+        # Dynamically sets it as a pre-release if it's a beta tag
+        prerelease: ${{ env.IS_PRERELEASE }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -141,6 +166,9 @@ jobs:
       if: startsWith(github.ref, 'refs/tags/') && matrix.os == 'ubuntu-latest' 
       uses: softprops/action-gh-release@v1
       with:
+        # Attaches linux executable to the release
         files: "*.deb"
+        # Dynamically sets it as a pre-release if it's a beta tag
+        prerelease: ${{ env.IS_PRERELEASE }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
