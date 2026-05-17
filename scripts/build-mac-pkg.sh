@@ -12,6 +12,7 @@ cat <<EOF > build_mac/scripts/postinstall
 chmod +x /usr/local/bin/inkify-agent
 chown root:wheel /Library/LaunchDaemons/com.inkify.agent.plist
 chmod 644 /Library/LaunchDaemons/com.inkify.agent.plist
+launchctl load -w /Library/LaunchDaemons/com.inkify.agent.plist
 exit 0
 EOF
 chmod +x build_mac/scripts/postinstall

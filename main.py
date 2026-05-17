@@ -58,6 +58,14 @@ def main():
     # 3. Prompt user if no token is found or if pairing fails (expired)
     while True:
         if not token:
+            if args.pair_only:
+                print("Error: No token provided in unattended (--pair-only) mode.", file=sys.stderr)
+                sys.exit(1)
+            
+            if not sys.stdin.isatty():
+                print("Error: No valid setup token found and no interactive terminal available.", file=sys.stderr)
+                sys.exit(1)
+
             print("\nNo valid setup token found.")
             print("👉 Register or Login as Host. 👉 Go to the Inkify Dashboard 👉 Find Generate Token. 👉 Type or Copy-paste exact Token.")
             token = input("Paste your 24-hour setup token here: ").strip()
@@ -74,6 +82,14 @@ def main():
         else:
             print("Pairing failed. The token is invalid or has expired.")
             token = None # Clear the variable so the loop asks the user
+            
+            if args.pair_only:
+                print("Error: Pairing failed in unattended (--pair-only) mode.", file=sys.stderr)
+                sys.exit(1)
+                
+            if not sys.stdin.isatty():
+                print("Error: Pairing failed and no interactive terminal available.", file=sys.stderr)
+                sys.exit(1)
 
 if __name__ == "__main__":
     main()

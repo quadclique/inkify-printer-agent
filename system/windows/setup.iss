@@ -60,8 +60,7 @@ Filename: "{app}\inkify-agent.exe"; Parameters: "--token ""{code:GetUserToken}""
 ; 2. Install the Windows Service using the wrapper (runhidden hides the black terminal window)
 Filename: "{app}\inkify-agent-service.exe"; Parameters: "install"; Flags: runhidden waituntilterminated
 ; 3. Start the Service immediately
-Filename: "{app}\inkify-agent-service.exe"; Parameters: "start"; Flags: runhidden waituntilterminated
-
+Filename: "{app}\inkify-agent-service.exe"; Parameters: "start"; Flags: runhidden nowait
 [UninstallRun]
 ; --- What to do BEFORE the files are deleted during Uninstallation ---
 ; 1. Stop the running service

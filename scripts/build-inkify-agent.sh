@@ -1,8 +1,17 @@
 #!/bin/bash
 set -e
 
+# Always force the script to run from the project root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_ROOT"
+
 echo "Building Inkify Agent Executable..."
-source .venv/bin/activate
+if [ -d ".venv" ]; then
+  source .venv/bin/activate
+else
+  echo "Warning: .venv not found. Make sure dependencies are installed globally or in your current environment."
+fi
 
 # Install PyInstaller if not present
 pip install pyinstaller

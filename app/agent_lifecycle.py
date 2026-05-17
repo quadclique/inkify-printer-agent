@@ -91,15 +91,24 @@ class PrinterAgent:
     def _loop(self) -> None:
         """The core polling loop."""
         self.queue_service.process_queue()
-
+        current_poll_interval = config.JOB_POLL_INTERVAL # Starts at 5s
+        max_poll_interval = config.MAX_JOB_POLL_INTERVAL # Maximum wait time cap (60s)
         while not self.stop_event.is_set():
             try:
                 # 1. Sync any offline events first
                 self.queue_service.process_queue()
 
                 # 2. Process new print jobs
-                self.job_service.process_pending_jobs()
+                jobs_processed = self.job_service.process_pending_jobs()
 
+                # Dynamically adjust polling interval based on activity
+                if jobs_processed > 0:
+                    current_poll_interval = config.JOB_POLL_INTERVAL # Reset to default if we processed jobs
+                else:
+                    # Exponential backoff if no jobs found, up to the max cap
+                    current_poll_interval = min(current_poll_interval * 2, max_poll_interval)
+                    logger.debug(f"No jobs found. Increasing poll interval to {current_poll_interval} seconds.")
+                
                 # 3. Run disk cleanup once every 24 hours
                 current_time = time.time()
                 if (
@@ -115,7 +124,7 @@ class PrinterAgent:
                 self.updater_service.apply_update_if_ready()
 
                 # 5. Wait for the configured interval before checking again
-                self.stop_event.wait(config.JOB_POLL_INTERVAL)
+                self.stop_event.wait(current_poll_interval)
             except Exception as e:
                 logger.error(f"Unexpected error during job polling cycle: {e}")
                 self.stop_event.wait(5)

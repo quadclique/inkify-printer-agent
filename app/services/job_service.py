@@ -36,8 +36,10 @@ class JobService:
     #     for job_data in jobs:
     #         self.executor.submit(self._handle_single_job, job_data)
 
-    def process_pending_jobs(self) -> None:
+    def process_pending_jobs(self) -> int:
         """Pulls and locks jobs one-by-one from the cloud until the queue is empty."""
+        jobs_processed = 0
+        
         while True:
             response = self.api_client.pull_next_job()
 
@@ -50,6 +52,10 @@ class JobService:
                 # Pass to the thread pool so we can instantly pull the next job!
                 self.executor.submit(self._handle_single_job, job_data)
                 
+                jobs_processed += 1
+                
+        return jobs_processed
+        
     def recover_interrupted_jobs(self) -> None:
         """
         Runs on agent startup. Finds jobs that were interrupted by a power loss
@@ -85,7 +91,7 @@ class JobService:
                     self._update_db_status(job_id, "failed")
 
                     # Safely move the file to the failed directory if it exists
-                    if file_path_str:
+                    if file_path_str and Path(file_path_str).exists():
                         Path(file_path_str).rename(
                             config.JOB_FAILED_DIR / Path(file_path_str).name
                         )

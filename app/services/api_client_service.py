@@ -134,6 +134,9 @@ class APIClientService:
                     for chunk in r.iter_content(chunk_size=config.FILE_CHUNK_SIZE):
                         f.write(chunk)
             return True
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout, requests.exceptions.ChunkedEncodingError) as e:
+            logger.warning(f"Network error during download from {url}: {e}. Retrying...")
+            raise
         except Exception as e:
             logger.error(f"Failed to download document from {url}: {e}")
             return False

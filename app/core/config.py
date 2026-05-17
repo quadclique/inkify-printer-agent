@@ -73,6 +73,7 @@ class AppConfig:
     # Default intervals (seconds)
     HEARTBEAT_INTERVAL = int(os.getenv("HEARTBEAT_INTERVAL", 10))
     JOB_POLL_INTERVAL = int(os.getenv("JOB_POLL_INTERVAL", 5))
+    MAX_JOB_POLL_INTERVAL = int(os.getenv("MAX_JOB_POLL_INTERVAL", 60))
     ERROR_SLEEP_SECONDS = int(os.getenv("ERROR_SLEEP_SECONDS", 5))
     PRINTER_SYNC_INTERVAL = int(os.getenv("PRINTER_SYNC_INTERVAL", 60))
     RETRY_BASE_DELAY = int(os.getenv("RETRY_BASE_DELAY", 1))

@@ -21,9 +21,19 @@ EOF
 cat <<EOF > "$PACKAGE_NAME/DEBIAN/postinst"
 #!/bin/bash
 chmod +x /opt/inkify/inkify-agent
+
+# Create a symlink so the user can type 'inkify-agent' anywhere in the terminal
+ln -sf /opt/inkify/inkify-agent /usr/local/bin/inkify-agent
+
+# Replace the template variables with the root user for the system service
+sed -i 's/{{USER}}/root/g' /etc/systemd/system/inkify-agent.service
+sed -i 's/{{GROUP}}/root/g' /etc/systemd/system/inkify-agent.service
+
 systemctl daemon-reload
 systemctl enable inkify-agent.service
-echo "Inkify Agent Installed. Open terminal and run: sudo inkify-agent"
+systemctl start inkify-agent.service
+
+echo "Inkify Agent Installed running in the background."
 exit 0
 EOF
 chmod +x "$PACKAGE_NAME/DEBIAN/postinst"

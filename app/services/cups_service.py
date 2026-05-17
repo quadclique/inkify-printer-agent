@@ -118,8 +118,9 @@ class CUPSManager:
                 logger.warning(
                     f"Printer attention required for {os_job_id} (Jam/Empty). Waiting for resolution..."
                 )
-                return False
-
+                time.sleep(5)
+                continue
+            
             time.sleep(2)  # Poll every 2 seconds
 
         error_msg = f"Job {os_job_id} timed out after {timeout} seconds in OS queue."

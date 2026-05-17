@@ -17,8 +17,8 @@
     <true/>
 
     <key>StandardOutPath</key>
-    <string>/var/log/inkify-agent.log</string>
+    <string>~/Library/Logs/inkify-agent.log</string>
     <key>StandardErrorPath</key>
-    <string>/var/log/inkify-agent.err</string>
+    <string>~/Library/Logs/inkify-agent.err</string>
 </dict>
 </plist>
