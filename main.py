@@ -77,8 +77,8 @@ def main():
             print("Agent successfully connected!")
             if args.pair_only:
                 sys.exit(0) # Exit so the installer can finish
-            agent.run()
-            break
+            print("Pairing complete! The background service will automatically start processing jobs.")
+            sys.exit(0)
         else:
             print("Pairing failed. The token is invalid or has expired.")
             token = None # Clear the variable so the loop asks the user

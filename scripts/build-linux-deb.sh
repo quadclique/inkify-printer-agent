@@ -8,6 +8,9 @@ mkdir -p "$PACKAGE_NAME/DEBIAN" "$PACKAGE_NAME/opt/inkify" "$PACKAGE_NAME/etc/sy
 cp dist/inkify-agent "$PACKAGE_NAME/opt/inkify/"
 cp system/linux/inkify-agent.service "$PACKAGE_NAME/etc/systemd/system/"
 
+# Replace the template variables with the root user for the system service
+sed -i 's/{{USER}}/root/g' "$PACKAGE_NAME/etc/systemd/system/inkify-agent.service"
+sed -i 's/{{GROUP}}/root/g' "$PACKAGE_NAME/etc/systemd/system/inkify-agent.service"
 cat <<EOF > "$PACKAGE_NAME/DEBIAN/control"
 Package: inkify-agent
 Version: $VERSION
@@ -27,10 +30,6 @@ ln -sf /opt/inkify/inkify-agent /usr/local/bin/inkify-agent
 
 # Safely stop the service if an older version is already running before modifying variables
 systemctl stop inkify-agent.service 2>/dev/null || true
-
-# Replace the template variables with the root user for the system service
-sed -i 's/{{USER}}/root/g' /etc/systemd/system/inkify-agent.service
-sed -i 's/{{GROUP}}/root/g' /etc/systemd/system/inkify-agent.service
 
 systemctl daemon-reload
 systemctl enable inkify-agent.service
