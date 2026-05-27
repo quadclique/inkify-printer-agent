@@ -82,9 +82,33 @@ class APIClientService:
             return None
 
     def sync_printers(self, printers: List[Dict]) -> Optional[Dict]:
-        """POST /agent/{agent_id}/printers/sync"""
+        """
+        POST /agent/printers/sync
+
+        Payload per printer includes:
+          - hardware_signature: stable device identity
+          - connections: list of {transport, device_uri, queue_name}
+          - status, is_online, supports_color, supports_duplex
+
+        Expected response:
+          {
+            "synced_printers": [
+              {
+                "hardware_signature": "...",
+                "cloud_printer_id": "uuid",
+                "local_name": "HP LaserJet",
+                "connections": [
+                  {"transport": "usb", "device_uri": "usb://...", "queue_name": "..."},
+                  {"transport": "network", "device_uri": "ipp://...", "queue_name": "..."}
+                ]
+              }
+            ]
+          }
+        Backend may omit `connections` in the response — the agent handles this gracefully
+        by falling back to the top-level connection_type/device_uri fields.
+        """
         return self._request(
-            "POST", f"/agent/printers/sync", json={"printers": printers}
+            "POST", "/agent/printers/sync", json={"printers": printers}
         )
 
     def check_in(self, agent_status: Dict[str, Any]) -> bool:

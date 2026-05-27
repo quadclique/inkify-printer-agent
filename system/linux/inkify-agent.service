@@ -1,32 +1,36 @@
 [Unit]
 Description=Inkify Printer Agent Service
-# Ensure we don't start until the internet and the OS printer service are up
+# Hard dependency: don't start until network is up
 After=network.target network-online.target cups.service
-Wants=network-online.target
+# Soft dependency: try to start CUPS if not running, but don't fail if absent
+Wants=network-online.target cups.service
 
 [Service]
 Type=simple
+# Dedicated service account (created by postinst)
 User={{USER}}
 Group={{GROUP}}
-# WorkingDirectory={{WORKING_DIR}}
 WorkingDirectory=/opt/inkify
-
-# Ensure the virtual environment is in the PATH
-# Environment="PATH={{WORKING_DIR}}/.venv/bin:/usr/bin:/usr/local/bin"
-
-# Start the application using the Python binary inside the virtual environment
-# ExecStart={{WORKING_DIR}}/.venv/bin/python main.py
 
 # Execute the standalone binary directly
 ExecStart=/opt/inkify/inkify-agent
 
-# Resilience: If the agent crashes (e.g., out of memory), wait 10 seconds and restart it
+# Resilience: restart on crash after 10 seconds
 Restart=always
 RestartSec=10
 
-# Allow systemd to cleanly terminate the main process and its children
+# Hard stop timeout
 KillMode=mixed
 TimeoutStopSec=15
+
+# Route stdout/stderr to journald (use: journalctl -u inkify-agent -f)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=inkify-agent
+
+# Security hardening
+PrivateTmp=true
+NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target

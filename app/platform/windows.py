@@ -110,11 +110,125 @@ class WindowsPrinterManager(BasePrinterManager):
         # Advanced DeviceCapabilities queries can be added here later
         return {"supports_color": True, "supports_duplex": False}
 
-    def _monitor_windows_job(self, job_id: str, printer_name: str, on_success: Optional[Callable], on_failure: Optional[Callable], timeout: int = 300):
-        # Simplified monitor: on Windows, ShellExecute fire-and-forgets to the default viewer/spooler.
-        logger.info(f"Windows job {job_id} dispatched. Assuming success after 10 seconds.")
-        time.sleep(10)
-        if on_success: on_success()
+    def _monitor_windows_job(
+        self,
+        job_id: str,
+        printer_name: str,
+        on_success: Optional[Callable],
+        on_failure: Optional[Callable],
+        timeout: int = 300,
+    ) -> None:
+        """
+        Monitors a Windows print job using WMI Win32_PrintJob queries.
+        Polls every 2 seconds until the job completes, errors, or times out.
+
+        WMI JobStatus codes of interest:
+          "Printing"    → in progress
+          "Printed"     → success (job left the spooler successfully)
+          "Error"       → hardware/driver error
+          "Offline"     → printer offline
+          "Paper Out"   → needs attention
+          "Paused"      → user-paused
+          "Deleting"    → job was cancelled
+        """
+        try:
+            import win32com.client  # type: ignore
+            import pythoncom  # type: ignore
+
+            pythoncom.CoInitialize()
+            wmi = win32com.client.Dispatch("WbemScripting.SWbemLocator")
+            svc = wmi.ConnectServer(".", "root\\cimv2")
+
+            start_time = time.time()
+            job_found_at_least_once = False
+
+            while time.time() - start_time < timeout:
+                try:
+                    # Query for our specific job by Document name (title we set)
+                    query = (
+                        f"SELECT * FROM Win32_PrintJob "
+                        f"WHERE Name LIKE '%{printer_name}%'"
+                    )
+                    jobs = svc.ExecQuery(query)
+                    job_list = list(jobs)
+
+                    if not job_list:
+                        if job_found_at_least_once:
+                            # Job disappeared from spooler — it was printed or deleted
+                            # Check if we saw it complete gracefully
+                            logger.info(
+                                f"Windows job for '{printer_name}' left the spooler. "
+                                f"Assuming success."
+                            )
+                            if on_success:
+                                on_success()
+                            return
+                        else:
+                            # Job hasn't appeared yet — wait a moment
+                            time.sleep(2)
+                            continue
+
+                    # Process the first matching job
+                    wmi_job = job_list[0]
+                    job_found_at_least_once = True
+                    status = (wmi_job.JobStatus or "").strip().lower()
+                    pages_printed = getattr(wmi_job, "PagesPrinted", 0) or 0
+
+                    logger.debug(
+                        f"Windows job '{printer_name}' status: {status}, "
+                        f"pages printed: {pages_printed}"
+                    )
+
+                    if status == "printed" or (status == "" and pages_printed > 0):
+                        logger.info(f"Windows job for '{printer_name}' printed successfully.")
+                        if on_success:
+                            on_success()
+                        return
+
+                    if status in ("error", "offline", "paper out", "deleting"):
+                        error_msg = (
+                            f"Windows print job failed for '{printer_name}': "
+                            f"status='{status}'"
+                        )
+                        logger.error(error_msg)
+                        if on_failure:
+                            on_failure(error_msg)
+                        return
+
+                    # Still printing — wait and poll again
+                    time.sleep(2)
+
+                except Exception as poll_err:
+                    logger.debug(f"WMI poll error (transient): {poll_err}")
+                    time.sleep(2)
+
+            # Timeout reached
+            timeout_msg = (
+                f"Windows job for '{printer_name}' timed out after {timeout}s."
+            )
+            logger.error(timeout_msg)
+            if on_failure:
+                on_failure(timeout_msg)
+
+        except ImportError:
+            # pywin32 not available — fall back to conservative wait
+            logger.warning(
+                "pywin32 not available for WMI job monitoring. "
+                "Waiting 15s and assuming success."
+            )
+            time.sleep(15)
+            if on_success:
+                on_success()
+        except Exception as e:
+            logger.error(f"WMI job monitor failed unexpectedly: {e}")
+            if on_failure:
+                on_failure(str(e))
+        finally:
+            try:
+                import pythoncom  # type: ignore
+                pythoncom.CoUninitialize()
+            except Exception:
+                pass
 
     def print_file_async(self, printer_name: str, file_path: str, title: str = "Inkify_Job", copies: int = 1, is_color: bool = False, on_success: Optional[Callable] = None, on_failure: Optional[Callable] = None) -> Optional[str]:
         try:

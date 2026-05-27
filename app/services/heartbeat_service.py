@@ -68,17 +68,40 @@ class HeartbeatService:
 
     def _build_heartbeat_payload(self) -> Dict[str, Any]:
         """Gathers data about the agent to send to the cloud."""
-        metrics = get_system_metrics()  # Example: { "cpu": 45.2, "ram_mb": 1024 }
-        # metrics = {"cpu": 0.0, "ram_mb": 0}  # Mock for now
+        metrics = get_system_metrics()
 
         local_printers = self.printer_service.get_available_printers()
 
+        # Read dynamic version from file (falls back to config constant)
+        version = config.APP_VERSION
+        try:
+            if config.VERSION_FILE.exists():
+                file_version = config.VERSION_FILE.read_text().strip()
+                if file_version:
+                    version = file_version
+        except Exception:
+            pass
+
+        # Enrich printer data so the frontend can display live status per cloud printer
+        printer_map = self.printer_service.printer_repo.get_printer_map()
+        sig_to_cloud_id = {
+            sig: data.get("cloud_printer_id")
+            for sig, data in printer_map.items()
+        }
+
         return {
-            "version": "1.0.0",  # You could read this from constants.VERSION_FILE
+            "version": version,
             "status": "online",
             "environment": config.ENVIRONMENT,
             "metrics": metrics,
             "printers": [
-                {"name": p["name"], "status": p["status"]} for p in local_printers
+                {
+                    "cloud_printer_id": sig_to_cloud_id.get(p.get("hardware_signature")),
+                    "name": p["name"],
+                    "status": p["status"],
+                    "connection_type": p["connection_type"],
+                    "is_online": p["status"] in ["idle", "printing"],
+                }
+                for p in local_printers
             ],
         }

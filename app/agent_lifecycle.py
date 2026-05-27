@@ -9,7 +9,6 @@ from app.repositories.printer_repo import PrinterRepository
 
 from app.services.api_client_service import APIClientService
 from app.services.job_service import JobService
-# from app.services.cups_service import CUPSManager
 from app.services.queue_service import QueueService
 from app.services.cleanup_service import CleanupService
 from app.services.updater_service import UpdaterService
@@ -17,6 +16,7 @@ from app.services.pairing_service import PairingService
 from app.services.printer_service import PrinterService
 from app.services.storage_service import StorageService
 from app.services.heartbeat_service import HeartbeatService
+from app.services.discovery_service import DiscoveryService
 
 from app.platform.factory import get_printer_manager
 
@@ -39,6 +39,9 @@ class PrinterAgent:
         self.pairing_service = PairingService(self.api_client, self.agent_repo)
         self.printer_service = PrinterService(self.api_client,self.printer_manager,self.printer_repo, self.storage_service)
         self.heartbeat_service = HeartbeatService(self.api_client, self.printer_service)
+        self.discovery_service = DiscoveryService(
+            on_change=self.printer_service.check_for_hardware_changes
+        )
         self.job_service = JobService(self.api_client, self.printer_service, self.storage_service,self.queue_service)
         
         self.cleanup_service = CleanupService(retention_days=7)
@@ -78,6 +81,7 @@ class PrinterAgent:
 
         # Start background threads
         self.heartbeat_service.start()
+        self.discovery_service.start()
 
         try:
             self._loop()
@@ -110,13 +114,14 @@ class PrinterAgent:
                     logger.debug(f"No jobs found. Increasing poll interval to {current_poll_interval} seconds.")
                 
                 # 3. Run disk cleanup once every 24 hours
+                # Note: printer sync is owned by DiscoveryService (event-driven + fallback poll).
+                # The cleanup cycle only handles file/log hygiene.
                 current_time = time.time()
                 if (
                     current_time - self.last_cleanup_time
                     > config.CLEANUP_INTERVAL_SECONDS
                 ):
                     self.cleanup_service.run_cleanup()
-                    self.printer_service.sync_printers_with_cloud()
                     self.last_cleanup_time = current_time
 
                 # 4. Check for self-updates
@@ -134,5 +139,6 @@ class PrinterAgent:
         self.stop_event.set()
         self.is_running = False
         self.heartbeat_service.stop()
+        self.discovery_service.stop()
         self.job_service.shutdown()
         logger.info(f"{config.APP_NAME} has shut down.")

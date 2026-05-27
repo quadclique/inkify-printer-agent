@@ -24,12 +24,16 @@ class PrinterService:
         return self.printer_manager.get_printers()
         
     def get_printer_name_by_cloud_uuid(self, cloud_uuid: str) -> Optional[str]:
-        """Translates a Cloud UUID back to the printer's physical CUPS name."""
+        """
+        Translates a Cloud UUID back to the printer's best available OS queue name.
+        Uses priority routing: USB > Network > IPP.
+        """
         printer_map = self.printer_repo.get_printer_map()
-        # printer_map 
         for signature, data in printer_map.items():
-            if data["cloud_printer_id"] == cloud_uuid:
-                return data["local_name"]
+            if data.get("cloud_printer_id") == cloud_uuid:
+                best = self.printer_repo.get_best_connection(signature)
+                if best:
+                    return best["queue_name"]
         return None
 
     def is_printer_ready(self, printer_name: str) -> bool:
@@ -129,26 +133,31 @@ class PrinterService:
             else:
                 logger.info(f"New Printer discovered: {p['name']} (Sig: {signature}). Ready for secure handshake.")
             
+            # Build all-transport connections for this signature
+            connections = self._build_connections_payload(local_printers, signature)
+
             payload.append({
                 "cloud_printer_id": known_cloud_id,
                 "name": p["name"],
-                "hardware_id": p["hardware_signature"],  # For CUPS, the queue name is the hardware ID
+                "hardware_id": p["hardware_signature"],
                 "hardware_signature": p["hardware_signature"],
                 "status": p["status"],
                 "raw_status": p.get("raw_status", ""),
                 "is_online": p["status"] in ["idle", "printing"],
-                "connection_type": p["connection_type"], 
+                "connection_type": p["connection_type"],
                 "device_uri": p["device_uri"],
                 "supports_color": p.get("supports_color", False),
-                "supports_duplex": p.get("supports_duplex", False)
+                "supports_duplex": p.get("supports_duplex", False),
+                "connections": connections,
             })
         
         for sig, data in existing_map.items():
             if sig not in detected_signatures:
-                logger.warning(f"Printer offline/unplugged: {data.get('local_name')} ({sig})")
+                display_name = data.get("display_name") or data.get("local_name", sig)
+                logger.warning(f"Printer offline/unplugged: {display_name} ({sig})")
                 payload.append({
                     "cloud_printer_id": data.get("cloud_printer_id"),
-                    "name": data.get("local_name"), 
+                    "name": display_name,
                     "hardware_signature": sig,
                     "status": "offline",
                     "raw_status": "unplugged",
@@ -156,10 +165,11 @@ class PrinterService:
                     "connection_type": "unknown",
                     "device_uri": "offline",
                     "supports_color": False,
-                    "supports_duplex": False
+                    "supports_duplex": False,
+                    "connections": [],
                 })
         
-        # Call the new sync endpoint (to be added to APIClientService)
+        # Call the sync endpoint
         response = self.api_client.sync_printers(payload)
         
         if response and isinstance(response, dict):
@@ -167,34 +177,83 @@ class PrinterService:
             updated_map = {}
             
             for cp in cloud_printers:
-                updated_map[cp["hardware_signature"]] = {
+                sig = cp["hardware_signature"]
+                # Build the new nested connection entry from the sync response
+                # The backend echoes back what connections it knows about
+                connections = {}
+                for conn in cp.get("connections", []):
+                    transport = conn.get("transport", "unknown")
+                    connections[transport] = {
+                        "device_uri": conn.get("device_uri", ""),
+                        "queue_name": conn.get("queue_name", cp.get("local_name", sig)),
+                        "last_seen": conn.get("last_seen"),
+                    }
+                
+                # Fallback: if backend doesn't return connections array, build from top-level fields
+                if not connections:
+                    transport = cp.get("connection_type", "unknown")
+                    connections[transport] = {
+                        "device_uri": cp.get("device_uri", ""),
+                        "queue_name": cp.get("local_name", sig),
+                        "last_seen": None,
+                    }
+
+                updated_map[sig] = {
                     "cloud_printer_id": cp["cloud_printer_id"],
-                    "local_name": cp["local_name"],
-                    "connection_type": cp.get("connection_type"),
-                    "device_uri": cp.get("device_uri"),
-            }
+                    "display_name": cp.get("local_name", sig),
+                    "connections": connections,
+                }
+
             self.printer_repo.save_printer_map(updated_map)
-            logger.info(f"Synced {len(updated_map)} printers. Routing map updated.")
+            logger.info(f"Synced {len(updated_map)} printers. Multi-connection routing map updated.")
             
+    def _build_connections_payload(self, local_printers: list, signature: str) -> list:
+        """
+        Builds the connections array for a given hardware signature,
+        collecting all transport variants detected for the same physical printer.
+        """
+        connections = []
+        seen_uris = set()
+        for p in local_printers:
+            if p["hardware_signature"] != signature:
+                continue
+            uri = p["device_uri"]
+            if uri in seen_uris:
+                continue
+            seen_uris.add(uri)
+            connections.append({
+                "transport": p["connection_type"],
+                "device_uri": uri,
+                "queue_name": p["name"],
+            })
+        return connections
+
     def check_for_hardware_changes(self):
-        """Auto-discovery check"""
+        """
+        Event-driven sync trigger — called by DiscoveryService on OS printer events.
+        Compares detected signatures against the saved map and triggers a cloud sync
+        if anything has changed (new printer, removed printer, new transport).
+        """
         current_local = self.printer_manager.get_printers()
         saved_map = self.printer_repo.get_printer_map()
-        
+
         needs_sync = False
-        
-        # Trigger sync if the count changes OR if a connection type changes
-        if len(current_local) != len(saved_map):
-            # printers total count changing
+
+        # Trigger sync if the physical printer count changes
+        current_signatures = {p["hardware_signature"] for p in current_local}
+        saved_signatures = set(saved_map.keys())
+
+        if current_signatures != saved_signatures:
+            # A printer was added or fully removed
             needs_sync = True
-        else:
-            # printer jumped from USB to Wi-Fi without the total count changing.
-            current_signatures = {p["hardware_signature"] for p in current_local}
-            saved_signatures = set(saved_map.keys())
-            
-            if current_signatures != saved_signatures:
-                needs_sync = True
-        
+        elif len(current_local) != sum(
+            len(e.get("connections", {})) for e in saved_map.values()
+        ):
+            # Same printers, but a new transport (e.g. USB + WiFi now) was detected
+            needs_sync = True
+
         if needs_sync:
             logger.info("Hardware environment changed. Triggering cloud sync...")
             self.sync_printers_with_cloud()
+        else:
+            logger.debug("Hardware check complete — no changes detected.")

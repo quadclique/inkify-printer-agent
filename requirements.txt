@@ -1,12 +1,19 @@
-# requirements.txt
 python-dotenv      # For loading .env files
 requests           # For making API calls
 psutil             # For gathering system metrics
 PyYAML             # For parsing .yaml config files
 
+# Discovery Service
+# Cross-platform filesystem event monitoring for instant printer detection.
+# Used by DiscoveryService to watch CUPS directories on macOS/Linux.
+# Falls back gracefully to interval polling if unavailable.
+watchdog>=4.0.0
 
-# --- Platform Specific Dependencies ---
-# PyInstaller will ONLY bundle this when building on a Windows machine
+# Security 
+cryptography>=42.0.0
+
+
+# Platform Specific Dependencies 
 pywin32; platform_system == "Windows"
 
 # Development & Testing (Optional in Production)

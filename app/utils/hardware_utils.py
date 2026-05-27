@@ -1,3 +1,4 @@
+import os
 import uuid
 import logging
 import platform
@@ -32,16 +33,53 @@ def get_hardware_id() -> str:
 
 
 def _get_linux_hw_id() -> str:
-    """Extracts the CPU serial number from /proc/cpuinfo on Linux systems."""
+    """
+    Extracts a stable hardware ID on Linux using a best-effort fallback chain:
+
+    1. CPU Serial (/proc/cpuinfo) — reliable on Raspberry Pi, empty on most x86.
+    2. Machine ID (/etc/machine-id) — systemd-generated UUID, stable across reboots
+       on all modern Linux distros (Ubuntu, Debian, Fedora, RHEL, Arch, etc.).
+    3. dmidecode system UUID — requires root, but may be available in production.
+    4. Returns empty string to trigger the caller's MAC address fallback.
+    """
+    # 1. CPU Serial (Raspberry Pi)
     try:
         with open("/proc/cpuinfo", "r") as f:
             for line in f:
                 if line.startswith("Serial"):
-                    # Looks like: "Serial      : 1000000021b3a4f"
-                    return line.split(":")[1].strip()
+                    serial = line.split(":")[1].strip()
+                    if serial and serial != "0000000000000000":
+                        return serial
     except Exception as e:
-        logger.warning(f"Failed to read Linux CPU serial: {e}")
-    
+        logger.debug(f"Could not read /proc/cpuinfo Serial: {e}")
+
+    # 2. /etc/machine-id — systemd stable ID (present on all modern Linux distros)
+    try:
+        machine_id_path = "/etc/machine-id"
+        if os.path.exists(machine_id_path):
+            with open(machine_id_path, "r") as f:
+                machine_id = f.read().strip()
+            if machine_id and len(machine_id) >= 16:
+                logger.debug(f"Using /etc/machine-id as hardware ID: {machine_id[:8]}...")
+                return machine_id
+    except Exception as e:
+        logger.debug(f"Could not read /etc/machine-id: {e}")
+
+    # 3. dmidecode system UUID (requires root)
+    try:
+        output = subprocess.check_output(
+            ["dmidecode", "-s", "system-uuid"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+        dmi_uuid = output.strip()
+        if dmi_uuid and dmi_uuid.lower() not in ("not specified", "not present", ""):
+            logger.debug(f"Using dmidecode system UUID as hardware ID.")
+            return dmi_uuid
+    except Exception as e:
+        logger.debug(f"dmidecode not available or no root access: {e}")
+
     return ""
 
 def _get_windows_uuid() -> str:

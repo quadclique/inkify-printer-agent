@@ -4,21 +4,35 @@
 <dict>
     <key>Label</key>
     <string>com.inkify.agent</string>
-    
+
     <key>ProgramArguments</key>
     <array>
         <string>/usr/local/bin/inkify-agent</string>
     </array>
-    
+
+    <!-- Automatically restart if the agent crashes -->
     <key>KeepAlive</key>
     <true/>
-    
+
+    <!-- Start immediately on login and on system boot -->
     <key>RunAtLoad</key>
     <true/>
 
+    <!-- Prevent rapid restart loops: wait 10s before restarting after a crash -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <!-- Production log paths (consistent with config.py LOG_DIR for frozen builds) -->
     <key>StandardOutPath</key>
-    <string>~/Library/Logs/inkify-agent.log</string>
+    <string>/var/log/inkify/inkify-agent.log</string>
     <key>StandardErrorPath</key>
-    <string>~/Library/Logs/inkify-agent.err</string>
+    <string>/var/log/inkify/inkify-agent.err</string>
+
+    <!-- Pass through PATH so the agent can invoke lp, lpstat, system_profiler etc. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
 </dict>
 </plist>

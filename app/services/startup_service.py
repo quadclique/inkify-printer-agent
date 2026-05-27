@@ -1,4 +1,5 @@
 import os
+import time
 import logging
 
 # Adjust the import path based on your exact package structure
@@ -73,13 +74,43 @@ class StartupService:
         """
         try:
             cls.ensure_directories()
-            
-            # Future expansion: You can add other startup tasks here, such as:
-            # - Removing stale .lock files from previous crashes
-            # - Running initial SQLite database migrations
-            # - Validating the presence of required config files (printers.yaml)
-            
+            cls._cleanup_stale_locks()
         except Exception as e:
             logger.critical(f"Critical failure during startup initialization: {e}")
-            # Exit the program completely if we can't build our required environment
             raise SystemExit(1)
+
+    @staticmethod
+    def _cleanup_stale_locks() -> None:
+        """
+        Removes orphaned .lock files left by crashes or power failures.
+        A lock file is considered stale if it is older than STALE_LOCK_AGE_SECONDS.
+        A live process would update its lock file within this window.
+        """
+        STALE_LOCK_AGE_SECONDS = 60
+
+        if not config.LOCK_DIR.exists():
+            return
+
+        lock_files = list(config.LOCK_DIR.glob("*.lock"))
+        if not lock_files:
+            return
+
+        now = time.time()
+        cleaned = 0
+        for lock_file in lock_files:
+            try:
+                age = now - lock_file.stat().st_mtime
+                if age > STALE_LOCK_AGE_SECONDS:
+                    lock_file.unlink()
+                    logger.warning(
+                        f"Removed stale lock file: {lock_file.name} "
+                        f"(age: {int(age)}s — likely from a crash or power failure)"
+                    )
+                    cleaned += 1
+            except Exception as e:
+                logger.debug(f"Could not inspect lock file {lock_file}: {e}")
+
+        if cleaned > 0:
+            logger.info(f"Startup cleanup: removed {cleaned} stale lock file(s).")
+        else:
+            logger.debug("Startup cleanup: no stale lock files found.")
