@@ -1,5 +1,5 @@
+import os
 import logging
-from pathlib import Path
 
 # Adjust the import path based on your exact package structure
 from app.core.config import config
@@ -47,19 +47,21 @@ class StartupService:
         logger.info("Verifying agent system directories...")
         
         for directory in directories_to_create:
-            try:
-                # exist_ok=True prevents errors if the directory already exists
-                # parents=True creates any intermediate directories that might be missing
-                if not directory.exists():
-                    directory.mkdir(parents=True, exist_ok=True)
-                    logger.debug(f"Created missing directory: {directory}")
-            except PermissionError:
-                logger.error(f"Permission denied: Cannot create directory at {directory}. "
-                             f"Check your user privileges.")
-                raise
-            except Exception as e:
-                logger.error(f"Unexpected error creating directory {directory}: {e}")
-                raise
+            if not directory.exists():
+                try:
+                    # exist_ok=True prevents errors if the directory already exists
+                    # parents=True creates any intermediate directories that might be missing
+                        directory.mkdir(parents=True, exist_ok=True)
+                        logger.debug(f"Created missing directory: {directory}")
+                        if os.name != 'nt':
+                            os.chmod(str(directory), 0o750)
+                except PermissionError:
+                    logger.error(f"Permission denied: Cannot create directory at {directory}. "
+                                f"Check your user privileges.")
+                    raise
+                except Exception as e:
+                    logger.error(f"Unexpected error creating directory {directory}: {e}")
+                    raise
                 
         logger.info("System directories verified successfully.")
 

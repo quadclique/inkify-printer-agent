@@ -1,5 +1,6 @@
 import os
 import uuid
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -14,11 +15,28 @@ class AppConfig:
     APP_VERSION = os.getenv("APP_VERSION", "1.0.0")
 
     # Base directories
-    # Path(__file__) = app/core/constants.py
-    BASE_DIR = Path(__file__).resolve().parent.parent.parent
-    RUNTIME_DIR = BASE_DIR / "runtime"
-    LOG_DIR = BASE_DIR / "logs"
-    CONFIG_DIR = BASE_DIR / "config"
+    if getattr(sys, 'frozen', False):
+        # If running as a compiled binary (.deb package), use the directory the binary is in (e.g., /opt/inkify)
+        BASE_DIR = Path(sys.executable).parent
+        
+        # Split mutable state away from binary directories based on standard OS patterns
+        if os.name == 'nt': # Windows Service
+            # e.g., C:\ProgramData\Inkify
+            RUNTIME_DIR = Path(os.getenv("ProgramData", "C:\\ProgramData")) / "Inkify"
+            LOG_DIR = RUNTIME_DIR / "logs"
+            CONFIG_DIR = RUNTIME_DIR / "config"
+        else: # Linux systemd / macOS launchd
+            # Standard UNIX state partitions
+            RUNTIME_DIR = Path("/var/lib/inkify")
+            LOG_DIR = Path("/var/log/inkify")
+            CONFIG_DIR = Path("/etc/inkify")
+    else:
+        # If running locally from source code, use the standard project root
+        BASE_DIR = Path(__file__).resolve().parent.parent.parent
+        RUNTIME_DIR = BASE_DIR / "runtime"
+        LOG_DIR = BASE_DIR / "logs"
+        CONFIG_DIR = BASE_DIR / "config"
+    
     SYSTEM_DIR = BASE_DIR / "system"
     SCRIPTS_DIR = BASE_DIR / "scripts"
 

@@ -4,7 +4,11 @@ VERSION="1.0.0"
 PACKAGE_NAME="inkify-agent_${VERSION}_amd64"
 
 echo "📦 Building Debian Package..."
-mkdir -p "$PACKAGE_NAME/DEBIAN" "$PACKAGE_NAME/opt/inkify" "$PACKAGE_NAME/etc/systemd/system"
+# Ensure a clean workspace before starting construction paths
+rm -rf "$PACKAGE_NAME"
+
+mkdir -p "$PACKAGE_NAME/DEBIAN" "$PACKAGE_NAME/opt/inkify" "$PACKAGE_NAME/etc/systemd/system" "$PACKAGE_NAME/var/lib/inkify" "$PACKAGE_NAME/var/log/inkify" "$PACKAGE_NAME/etc/inkify"
+
 cp dist/inkify-agent "$PACKAGE_NAME/opt/inkify/"
 cp system/linux/inkify-agent.service "$PACKAGE_NAME/etc/systemd/system/"
 
@@ -27,6 +31,9 @@ chmod +x /opt/inkify/inkify-agent
 
 # Create a symlink so the user can type 'inkify-agent' anywhere in the terminal
 ln -sf /opt/inkify/inkify-agent /usr/local/bin/inkify-agent
+
+# Enforce secure ownership bounds on system partitions
+chmod 750 /var/lib/inkify /etc/inkify /var/log/inkify
 
 # Safely stop the service if an older version is already running before modifying variables
 systemctl stop inkify-agent.service 2>/dev/null || true
