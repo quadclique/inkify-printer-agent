@@ -20,7 +20,7 @@ from app.services.startup_service import StartupService
 
 def extract_token_from_filename() -> str:
     """Extracts token if the executable is named like 'InkifySetup--tkn_abc123.exe'"""
-    filename = os.path.basename(sys.executable)
+    filename = os.path.basename(sys.executable if getattr(sys, 'frozen', False) else sys.argv[0])
     match = re.search(r'--(tkn_[a-zA-Z0-9]+)', filename)
     if match:
         return match.group(1)
@@ -33,11 +33,15 @@ def main():
     parser.add_argument("--pair-only", action="store_true", help="Pair and exit immediately.")
     args = parser.parse_args()
     
-    # 1. Start logging first so everything else can log properly
+    # 1. Ensure all folders exist BEFORE starting the logger!
+    try:
+        StartupService.initialize_environment()
+    except Exception as e:
+        print(f"Failed to initialize directories: {e}")
+        sys.exit(1)
+    
+    # 2. Start logging first so everything else can log properly
     setup_logging()
-
-    # 2. Ensure all folders exist
-    StartupService.initialize_environment()
 
     # 3. Initialize the database tables
     LocalAgentDB.initialize_schema()
@@ -58,11 +62,7 @@ def main():
     # 3. Prompt user if no token is found or if pairing fails (expired)
     while True:
         if not token:
-            if args.pair_only:
-                print("Error: No token provided in unattended (--pair-only) mode.", file=sys.stderr)
-                sys.exit(1)
-            
-            if not sys.stdin.isatty():
+            if args.pair_only and not sys.stdin.isatty():
                 print("Error: No valid setup token found and no interactive terminal available.", file=sys.stderr)
                 sys.exit(1)
 
@@ -78,16 +78,13 @@ def main():
             if args.pair_only:
                 sys.exit(0) # Exit so the installer can finish
             print("Pairing complete! The background service will automatically start processing jobs.")
+            agent.run() # Start the main event loop
             sys.exit(0)
         else:
             print("Pairing failed. The token is invalid or has expired.")
             token = None # Clear the variable so the loop asks the user
             
-            if args.pair_only:
-                print("Error: Pairing failed in unattended (--pair-only) mode.", file=sys.stderr)
-                sys.exit(1)
-                
-            if not sys.stdin.isatty():
+            if args.pair_only and not sys.stdin.isatty():
                 print("Error: Pairing failed and no interactive terminal available.", file=sys.stderr)
                 sys.exit(1)
 

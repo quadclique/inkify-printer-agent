@@ -56,7 +56,7 @@ end;
 [Run]
 ; --- What to do AFTER the files are copied ---
 ; 1. First, run the agent briefly in "pair-only" mode using the token the user typed in the box
-Filename: "{app}\inkify-agent.exe"; Parameters: "--token ""{code:GetUserToken}"" --pair-only"; Flags: runhidden waituntilterminated
+Filename: "{app}\inkify-agent.exe"; Parameters: "--token ""{code:GetUserToken}"" --pair-only"; Flags: waituntilterminated
 ; 2. Install the Windows Service using the wrapper (runhidden hides the black terminal window)
 Filename: "{app}\inkify-agent-service.exe"; Parameters: "install"; Flags: runhidden waituntilterminated
 ; 3. Start the Service immediately
