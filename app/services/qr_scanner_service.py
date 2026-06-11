@@ -1,42 +1,66 @@
+import sys
 import threading
 import logging
-from app.services.api_client_service import APIClientService
 
 logger = logging.getLogger(__name__)
 
 class QRScannerService:
-    def __init__(self, api_client: APIClientService):
+    """
+    Listens on stdin for USB barcode scanner input.
+    A USB HID scanner acts as a keyboard that types scanned text + Enter.
+    """
+
+    QR_PREFIX = "inkify_job_release:"
+
+    def __init__(self, api_client):
         self.api_client = api_client
-        self.is_running = False
+        self._is_running = False
+        self._thread: threading.Thread
 
-    def start(self):
+    def start(self) -> None:
+        # Prevent starting if stdin is completely unavailable (e.g., some headless daemons)
+        if not sys.stdin or not sys.stdin.isatty():
+            logger.debug("No interactive TTY detected. QR Scanner listener will not start.")
+            # Note: We don't fully exit here because some barcode scanners map to dev/input 
+            # instead of a pure TTY depending on the host OS. 
+            # However, for stdin-based listening, being defensive is key.
         """Starts the background listener for the USB Barcode Scanner."""
-        self.is_running = True
-        # Run in a daemon thread so it doesn't block the main polling loop
-        listener_thread = threading.Thread(target=self._listen_loop, daemon=True)
-        listener_thread.start()
+        self._is_running = True
+        self._thread = threading.Thread(
+            target=self._listen_loop,
+            name="QRScannerThread",
+            daemon=True,
+        )
+        self._thread.start()
         logger.info("USB QR Scanner listener started. Waiting for scans...")
+    def stop(self) -> None:
+        self._is_running = False
+        # Note: input() is blocking, so the thread will linger until next input or app exit.
+        # Since it's daemon=True, it will cleanly die when the main thread exits.
 
-    def _listen_loop(self):
-        while self.is_running:
+    def _listen_loop(self) -> None:
+        while self._is_running:
             try:
                 # The built-in input() function catches the scanner's output 
                 # because the scanner simulates a keyboard typing + hitting "Enter"
-                scanned_text = input().strip()
-                
-                if scanned_text.startswith("inkify_job_release:"):
+                scanned_qr = input().strip()
+                if not scanned_qr:
+                    continue
+
+                if scanned_qr.startswith(self.QR_PREFIX):
                     logger.info("Secure QR Code scanned! Sending to cloud...")
-                    self._send_to_cloud(scanned_text)
-                elif scanned_text:
-                    logger.warning("Unrecognized QR code scanned. Ignoring.")
-                    
+                    self._send_to_cloud(scanned_qr)
+                elif scanned_qr:
+                    logger.warning("Unrecognized QR code scanned. Ignoring: {scanned[:40]}...")
+
             except EOFError:
                 # Handle environment where stdin is closed
-                pass
+                logger.debug("EOF reached on stdin. Stopping QR scanner loop.")
+                break
             except Exception as e:
                 logger.error(f"Scanner listener encountered an error: {e}")
 
-    def _send_to_cloud(self, qr_token: str):
+    def _send_to_cloud(self, qr_token: str) -> None:
         """Passes the raw token to the backend for validation and release."""
         try:
             # We hit the exact route we built in FastAPI earlier
@@ -45,10 +69,7 @@ class QRScannerService:
             if success:
                 logger.info("Cloud validated scan! Job released and will be pulled on next poll.")
             else:
-                logger.error(f"Cloud rejected scan. Token may be invalid or wrong printer.")
+                logger.error(f"Cloud rejected QR Code. QR code may be corrupt/invalid or wrong printer.")
                 
         except Exception as e:
-            logger.error(f"Failed to communicate with cloud: {e}")
-
-    def stop(self):
-        self.is_running = False
+            logger.error(f"Failed to submit QR Code: {e}")

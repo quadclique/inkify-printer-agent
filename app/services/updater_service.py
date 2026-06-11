@@ -1,7 +1,7 @@
 import logging
 import time
 from datetime import datetime
-from pathlib import Path
+
 import subprocess
 
 from app.core.config import config
@@ -28,10 +28,9 @@ class UpdaterService:
                 file_version = config.VERSION_FILE.read_text().strip()
                 if file_version:  # Ensure it's not just an empty string
                     return file_version
-            return config.APP_VERSION
         except Exception as e:
             logger.error(f"Failed to read version file: {e}")
-            return config.APP_VERSION
+        return config.APP_VERSION
 
     def check_for_updates(self) -> None:
         """
@@ -48,7 +47,6 @@ class UpdaterService:
         )
 
         try:
-            # Assuming your API has an endpoint like GET /agent/version
             update_data = self.api_client._request("GET", "/agent/version")
 
             if not update_data:
@@ -86,7 +84,6 @@ class UpdaterService:
         current_time = now.strftime("%H:%M")
 
         # Simple string comparison works for HH:MM 24-hour format
-        # e.g., "01:00" <= "02:30" <= "04:00"
         start = config.UPDATE_WINDOW_START
         end = config.UPDATE_WINDOW_END
 
@@ -102,7 +99,7 @@ class UpdaterService:
         This will likely kill the current Python process.
         """
         try:
-            # Example: Download a bash script and execute it
+            # Download a bash script and execute it
             script_path = config.RUNTIME_DIR / "update.sh"
             success = self.api_client.download_job_file(url, str(script_path))
 
@@ -111,7 +108,7 @@ class UpdaterService:
                 # Make script executable and run it in the background
                 script_path.chmod(0o755)
                 subprocess.Popen([str(script_path)])
-
+                logger.info("Update script launched. Exiting agent process...")
                 # Exit this current python process so the script can overwrite files
                 import sys
 

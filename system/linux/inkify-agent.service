@@ -1,6 +1,7 @@
 [Unit]
 Description=Inkify Printer Agent Service
 # Hard dependency: don't start until network is up
+Documentation=https://docs.inkify.in/agent
 After=network.target network-online.target cups.service
 # Soft dependency: try to start CUPS if not running, but don't fail if absent
 Wants=network-online.target cups.service
@@ -16,12 +17,12 @@ WorkingDirectory=/opt/inkify
 ExecStart=/opt/inkify/inkify-agent
 
 # Resilience: restart on crash after 10 seconds
-Restart=always
+Restart=on-failure
 RestartSec=10
 
-# Hard stop timeout
+# Graceful stop timeout
 KillMode=mixed
-TimeoutStopSec=15
+TimeoutStopSec=20
 
 # Route stdout/stderr to journald (use: journalctl -u inkify-agent -f)
 StandardOutput=journal
@@ -31,6 +32,9 @@ SyslogIdentifier=inkify-agent
 # Security hardening
 PrivateTmp=true
 NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/inkify /var/log/inkify /etc/inkify
 
 [Install]
 WantedBy=multi-user.target

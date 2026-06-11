@@ -16,6 +16,15 @@ cryptography>=42.0.0
 # Platform Specific Dependencies 
 pywin32; platform_system == "Windows"
 
+# Build tooling 
+pyinstaller
+
 # Development & Testing (Optional in Production)
 pytest
+pytest-cov
 pytest-mock
+black
+ruff
+mypy
+types-PyYAML
+types-requests

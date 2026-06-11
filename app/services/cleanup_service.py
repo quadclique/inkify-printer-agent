@@ -14,7 +14,7 @@ class CleanupService:
     Designed to run periodically (e.g., once a day) in the background.
     """
 
-    def __init__(self, retention_days: int = 7):
+    def __init__(self, retention_days: int = getattr(config, "CLEANUP_RETENTION_DAYS", 7)):
         self.retention_days = retention_days
         self.retention_seconds = self.retention_days * 24 * 60 * 60
 
@@ -41,7 +41,8 @@ class CleanupService:
         """
         Deletes files in the specified directory that are older than the retention period.
         """
-        if not directory.exists():
+        # Safety check: avoid crashing if the directory hasn't been created yet
+        if not directory.exists() or not directory.is_dir():
             return
 
         current_time = time.time()
@@ -51,7 +52,6 @@ class CleanupService:
         for filepath in directory.iterdir():
             if not filepath.is_file():
                 continue
-
             try:
                 # Get the last modified time of the file
                 file_age_seconds = current_time - filepath.stat().st_mtime
@@ -102,19 +102,18 @@ class CleanupService:
         try:
             with LocalAgentDB.get_connection() as conn:
                 cursor = conn.cursor()
-
+                
                 cursor.execute(clean_jobs_sql, (cutoff_date_modifier,))
                 jobs_deleted = cursor.rowcount
-
+                
                 cursor.execute(clean_queue_sql, (cutoff_date_modifier,))
                 queue_deleted = cursor.rowcount
-
+                
                 conn.commit()
 
-            if jobs_deleted > 0 or queue_deleted > 0:
+            if jobs_deleted or queue_deleted:
                 logger.info(
                     f"Database cleanup: Removed {jobs_deleted} old jobs and {queue_deleted} old queue events."
                 )
-
         except Exception as e:
             logger.error(f"Failed to clean up database records: {e}")

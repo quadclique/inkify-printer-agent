@@ -3,7 +3,7 @@ import logging
 from typing import Dict, Any
 
 from app.core.config import config
-from app.core.local_agent_db import LocalAgentDB
+from app.models.queue_model import QueueEventModel
 
 logger = logging.getLogger(__name__)
 
@@ -14,27 +14,30 @@ class QueueService:
     and SQLite for a persistent, queryable audit ledger.
     """
 
-    def __init__(self, api_client, storage_service):
+    def __init__(self, api_client, storage_service, queue_repo):
         self.api_client = api_client
         self.storage_service = storage_service
+        self.queue_repo = queue_repo
 
     def enqueue_event(
         self, job_id: str, event_type: str, payload: Dict[str, Any]
     ) -> None:
         try:
-            payload_str = json.dumps(payload)
-            """
-            Saves an event to the local database to be synced with the cloud later.
-            """
-            sql = """
-                INSERT INTO queue_events (job_id, event_type, payload, synced)
-                VALUES (?, ?, ?, 0)
-            """
-            with LocalAgentDB.get_connection() as conn:
-                cursor = conn.execute(sql, (job_id, event_type, payload_str))
-                event_id = cursor.lastrowid
-                conn.commit()
+            event = QueueEventModel(
+                job_id=job_id,
+                event_type=event_type,
+                payload=payload
+            )
+            [event_id, success] = self.queue_repo.add_event(event)
+
+            if not success:
+                logger.error(f"Failed to save event to database for job {job_id}")
+                return
+
             logger.debug(f"Queued '{event_type}' event for job {job_id} offline.")
+
+            # Ensure directory exists before writing
+            config.QUEUE_PENDING_DIR.mkdir(parents=True, exist_ok=True)
 
             # 2. EXECUTION: Write the physical file
             filename = f"{event_id}_{job_id}_{event_type}.json"
@@ -47,10 +50,14 @@ class QueueService:
                 "payload": payload
             }
 
-            with open(filepath, "w") as f:
-                json.dump(event_data, f)
-            
-            logger.info(f"📥 EVENT QUEUED: {filename} [PENDING]")
+            try:
+                with open(filepath, "w") as f:
+                    json.dump(event_data, f)
+                
+                logger.info(f"📥 EVENT QUEUED: {filename} [PENDING]")
+            except Exception as e:
+                logger.error(f"Failed to write physical queue file {filename}: {e}. Rolling back database entry.")
+                self.queue_repo.delete_event(event_id)
             
         except Exception as e:
             logger.error(f"Failed to write queue event for job {job_id}: {e}")
@@ -59,7 +66,11 @@ class QueueService:
         if not config.QUEUE_PENDING_DIR.exists():
             return
 
-        pending_files = [f for f in config.QUEUE_PENDING_DIR.iterdir() if f.is_file() and f.name.endswith(".json")]
+        # Sort pending files numerically by event_id to process oldest first
+        pending_files = sorted(
+            [f for f in config.QUEUE_PENDING_DIR.iterdir() if f.is_file() and f.name.endswith(".json")],
+            key=lambda f: int(f.name.split('_')[0]) if f.name.split('_')[0].isdigit() else 0
+        )
 
         if not pending_files:
             return
@@ -87,13 +98,11 @@ class QueueService:
                 success = self._dispatch_event(job_id, event_type, payload)
 
                 if success:
-                    # SCENARIO A: Success -> Move file & Update DB
+                    # Success -> Move file & Update DB
                     self.storage_service.transition_queue_file(filename, "processing", "completed")
-                    with LocalAgentDB.get_connection() as conn:
-                        conn.execute("UPDATE queue_events SET synced = 1 WHERE event_id = ?", (event_id,))
-                        conn.commit()
+                    self.queue_repo.mark_as_synced(event_id)
                 else:
-                    # SCENARIO B: Network Down -> Move back to Pending
+                    # Network Down -> Move back to Pending
                     self.storage_service.transition_queue_file(filename, "processing", "pending")
                     logger.warning(f"⏳ EVENT DELAYED: {filename} (Network offline)")
                     break
@@ -109,7 +118,11 @@ class QueueService:
         if event_type == "status_update":
             status = payload.get("status")
             details = payload.get("details", "")
-            return self.api_client.update_job_status(job_id, str(status), details)
+            try:
+                return self.api_client.update_job_status(job_id, str(status), details)
+            except Exception as e:
+                logger.warning(f"Network error dispatching queue event {event_type} for job {job_id}: {e}")
+                return False
 
         logger.error(f"Unknown event type in queue: {event_type}")
         return True

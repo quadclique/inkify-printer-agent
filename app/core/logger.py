@@ -33,6 +33,8 @@ def setup_logging() -> None:
     root_logger.addHandler(console_handler)
 
     # 2. General Agent File Handler (Max 5MB per file, keep last 3)
+    # Ensure log directory exists before creating file handlers
+    config.LOG_DIR.mkdir(parents=True, exist_ok=True)
     try:
         agent_file_handler = RotatingFileHandler(
             filename=config.AGENT_LOG_FILE,

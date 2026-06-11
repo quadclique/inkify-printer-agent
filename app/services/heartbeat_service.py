@@ -4,7 +4,6 @@ import threading
 from typing import Dict, Any
 
 from app.core.config import config
-from app.services.printer_service import PrinterService
 from app.utils.system_utils import get_system_metrics
 
 logger = logging.getLogger(__name__)
@@ -45,9 +44,9 @@ class HeartbeatService:
         if self._thread and self._thread.is_alive():
             logger.info("Stopping heartbeat service...")
             self._stop_event.set()
-            self._thread.join(timeout=5)
+            self._thread.join(timeout=config.THREAD_JOIN_TIMEOUT)
             logger.debug("Heartbeat service stopped.")
-
+            
     def _run_heartbeat(self) -> None:
         """The infinite loop that runs inside the thread."""
         while not self._stop_event.is_set():
@@ -67,10 +66,8 @@ class HeartbeatService:
             self._stop_event.wait(self.interval)
 
     def _build_heartbeat_payload(self) -> Dict[str, Any]:
-        """Gathers data about the agent to send to the cloud."""
+        """Assembles the heartbeat payload with system metrics and printer statuses."""
         metrics = get_system_metrics()
-
-        local_printers = self.printer_service.get_available_printers()
 
         # Read dynamic version from file (falls back to config constant)
         version = config.APP_VERSION
@@ -79,14 +76,22 @@ class HeartbeatService:
                 file_version = config.VERSION_FILE.read_text().strip()
                 if file_version:
                     version = file_version
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Failed to read version file: {e}")
 
-        # Enrich printer data so the frontend can display live status per cloud printer
-        printer_map = self.printer_service.printer_repo.get_printer_map()
+        # Gather printer state safely
+        try:
+            local_printers = self.printer_service.get_available_printers()
+            printer_map = self.printer_service.printer_repo.get_printer_map()
+        except Exception as e:
+            logger.error(f"Heartbeat failed to fetch printer info: {e}")
+            local_printers = []
+            printer_map = {}
+
         sig_to_cloud_id = {
             sig: data.get("cloud_printer_id")
             for sig, data in printer_map.items()
+            if isinstance(data, dict)
         }
 
         return {

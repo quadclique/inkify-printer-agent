@@ -26,7 +26,7 @@
     <key>StandardOutPath</key>
     <string>/var/log/inkify/inkify-agent.log</string>
     <key>StandardErrorPath</key>
-    <string>/var/log/inkify/inkify-agent.err</string>
+    <string>/var/log/inkify/inkify-error.log</string>
 
     <!-- Pass through PATH so the agent can invoke lp, lpstat, system_profiler etc. -->
     <key>EnvironmentVariables</key>

@@ -1,22 +1,34 @@
 <service>
   <id>inkify-agent</id>
-  
   <name>Inkify Printer Agent</name>
-  
   <description>Background agent that connects local hardware to the Inkify Cloud.</description>
-  
+
+  <!-- %BASE% resolves to the directory containing this XML file -->
   <executable>%BASE%\inkify-agent.exe</executable>
-  
   <workingdirectory>%BASE%</workingdirectory>
 
+  <!-- Start automatically with Windows -->
   <startmode>Automatic</startmode>
 
-  <onfailure action="restart" delay="10 sec"/>
-  <onfailure action="restart" delay="20 sec"/>
-  
-  <stoptimeout>15 sec</stoptimeout>
+  <!-- Delay auto-start by 10s to let the network stack settle -->
+  <delayedAutoStart>true</delayedAutoStart>
 
+  <!-- Restart on failure: 10s, then 30s, then every 60s -->
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+
+  <!-- Graceful stop timeout -->
+  <stoptimeout>20 sec</stoptimeout>
+
+  <!-- Rolling log: rotate when file exceeds 10 MB, keep last 3 -->
   <log mode="roll-by-size">
-    <sizeThreshold>10240</sizeThreshold> <keepFiles>3</keepFiles>
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>3</keepFiles>
   </log>
+
+  <!-- Optional: pass environment variables to the process -->
+  <!--
+      <env name="API_URL" value="https://api.inkify.in"/>
+  -->
 </service>

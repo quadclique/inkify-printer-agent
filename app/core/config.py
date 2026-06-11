@@ -73,7 +73,7 @@ class AppConfig:
     PRINTERS_CONFIG_FILE = CONFIG_DIR / "inkify-printers.yaml"
 
     # Network & App specific rules
-    API_URL = os.getenv("API_URL", "http://127.0.0.1:8000")
+    API_URL = os.getenv("API_URL", "https://api.epicsify.com")
     AGENT_TOKEN = os.getenv("AGENT_TOKEN", "")
     API_TIMEOUT_DEFAULT = int(os.getenv("API_TIMEOUT_DEFAULT", 10))
     API_TIMEOUT_DOWNLOAD = int(os.getenv("API_TIMEOUT_DOWNLOAD", 30))

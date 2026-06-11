@@ -2,6 +2,7 @@ import time
 import logging
 from functools import wraps
 from typing import Callable, Any, Type
+
 from app.core.config import config
 
 logger = logging.getLogger(__name__)

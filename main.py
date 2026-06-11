@@ -20,17 +20,28 @@ from app.services.startup_service import StartupService
 
 def extract_token_from_filename() -> str:
     """Extracts token if the executable is named like 'InkifySetup--tkn_abc123.exe'"""
-    filename = os.path.basename(sys.executable if getattr(sys, 'frozen', False) else sys.argv[0])
-    match = re.search(r'--(tkn_[a-zA-Z0-9]+)', filename)
-    if match:
-        return match.group(1)
+    try:
+        filename = os.path.basename(sys.executable if getattr(sys, 'frozen', False) else sys.argv[0])
+        match = re.search(r'--(tkn_[a-zA-Z0-9]+)', filename)
+        if match:
+            return match.group(1)
+    except Exception as e:
+        print(f"Failed to extract token from filename: {e}")
     return ""
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Inkify Printer Agent")
+    parser = argparse.ArgumentParser(
+        description="Inkify Printer Agent", 
+        formatter_class=argparse.RawDescriptionHelpFormatter, 
+        epilog=(
+            "  python main.py                          # Run (must already be paired)\n"
+            "  python main.py --token tkn_abc123       # Pair and run\n"
+            "  python main.py --token tkn_abc123 --pair-only  # Pair only (Used for Installers)\n"
+        )
+    )
     parser.add_argument("--token", type=str, help="Pre-provisioned registration token from the dashboard")
-    parser.add_argument("--pair-only", action="store_true", help="Pair and exit immediately.")
+    parser.add_argument("--pair-only", action="store_true", help="Pair and exit immediately. Used by OS installers so they can start the service separately.")
     args = parser.parse_args()
     
     # 1. Ensure all folders exist BEFORE starting the logger!

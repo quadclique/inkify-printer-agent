@@ -10,86 +10,107 @@ logger = logging.getLogger(__name__)
 
 
 class UnixPrinterManager(BasePrinterManager):
-    """CUPS implementation for Linux and macOS."""
     """
+    CUPS implementation for Linux and macOS.
     Low-level interface for interacting with the local OS printing system (CUPS).
     Uses native shell commands (`lp`, `lpstat`) for maximum compatibility on Unix.
     """
 
+    def _run_cmd(self, cmd: List[str], timeout: int = 10, check: bool = False) -> subprocess.CompletedProcess:
+        """Helper to run shell commands with standard options."""
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=check
+        )
+
     def get_printers(self) -> List[Dict[str, str]]:
         """
         Queries the OS for all available printers and their current status.
-        Uses `lpstat -p` which outputs lines like: 'printer HP_LaserJet is idle...'
         """
         printers = []
         try:
             # 1. Get URIs (lpstat -v outputs: "device for PrinterName: usb://...")
-            uri_result = subprocess.run(["lpstat", "-v"], capture_output=True, text=True, check=True)
-            uri_map = {}
-            for line in uri_result.stdout.splitlines():
-                if line.startswith("device for"):
-                    parts = line.split(":", 1) # Split only on the first colon
-                    if len(parts) == 2:
-                        name = parts[0].replace("device for ", "").strip()
-                        uri = parts[1].strip()
-                        uri_map[name] = uri
-            
-            # # 2. Get Statuses (lpstat -p) 
-            status_result = subprocess.run(
-                ["lpstat", "-p"], capture_output=True, text=True, check=True
-            )
-            lines = status_result.stdout.splitlines()
+            uri_map: Dict[str, str] = {}
+            try:
+                uri_result = self._run_cmd(["lpstat", "-v"], check=True)
+                for line in uri_result.stdout.splitlines():
+                    if line.startswith("device for"):
+                        parts = line.split(":", 1) # Split only on the first colon
+                        if len(parts) == 2:
+                            name = parts[0].replace("device for ", "").strip()
+                            uri = parts[1].strip()
+                            uri_map[name] = uri
+            except subprocess.CalledProcessError:
+                logger.warning("Failed to get printer URIs. Continuing without device URIs.")
+            except Exception as e:
+                logger.debug(f"Could not read URIs via lpstat -v: {e}")
+                
+            # 2. Get Statuses (lpstat -p) 
+            status_result = self._run_cmd(["lpstat", "-p"], check=True)
 
-            for line in lines:
-                if line.startswith("printer"):
-                    parts = line.split()
-                    if len(parts) >= 4:
-                        printer_name = parts[1]
-                        # "is idle.", "now printing", "disabled"
-                        status_str = " ".join(parts[3:]).strip().lower()
+            for line in status_result.stdout.splitlines():
+                if not line.startswith("printer"):
+                    continue
+                
+                parts = line.split()
+                if len(parts) < 4:
+                    continue
+                    
+                printer_name = parts[1]
+                # "is idle.", "now printing", "disabled"
+                status_str = " ".join(parts[3:]).strip().lower()
 
-                        # Normalize status
-                        if "idle" in status_str:
-                            status = "idle"
-                        elif "printing" in status_str:
-                            status = "printing"
-                        else:
-                            status = "offline"
-                        
-                        uri = uri_map.get(printer_name, "")
-                        
-                        # 3. Extract Connection Type & Hardware Signature
-                        connection_type = "unknown"
-                        hardware_signature = printer_name # Fallback
-                        
-                        if uri.startswith("usb"):
-                            connection_type = "usb"
-                        elif uri.startswith(("socket", "ipp", "http", "dnssd", "lpd")):
-                            connection_type = "network"
+                # Normalize status
+                if "idle" in status_str:
+                    status = "idle"
+                elif "printing" in status_str:
+                    status = "printing"
+                else:
+                    status = "offline"
+                
+                uri = uri_map.get(printer_name, "")
+                
+                # 3. Extract Connection Type & Hardware Signature
+                connection_type = "unknown"
+                hardware_signature = printer_name  # Fallback
+                
+                if uri.startswith("usb"):
+                    connection_type = "usb"
+                elif uri.startswith(("socket", "ipp", "http", "dnssd", "lpd")):
+                    connection_type = "network"
 
-                        # Parse the URI to find serial numbers (e.g., usb://HP/LaserJet?serial=12345)
-                        parsed_uri = urllib.parse.urlparse(uri)
-                        query_params = urllib.parse.parse_qs(parsed_uri.query)
-                        
-                        if "serial" in query_params:
-                            hardware_signature = query_params["serial"][0]
-                        elif "uuid" in query_params:
-                            hardware_signature = query_params["uuid"][0]
-                        caps = self.get_printer_capabilities(printer_name)
+                # Parse the URI to find serial numbers or UUIDs for better hardware identification
+                try:
+                    parsed_uri = urllib.parse.urlparse(uri)
+                    query_params = urllib.parse.parse_qs(parsed_uri.query)
+                    
+                    if "serial" in query_params:
+                        hardware_signature = query_params["serial"][0]
+                    elif "uuid" in query_params:
+                        hardware_signature = query_params["uuid"][0]
+                    elif parsed_uri.netloc:
+                        hardware_signature = f"net_{parsed_uri.netloc}_{printer_name}"
+                except Exception as e:
+                    logger.debug(f"Failed to parse URI {uri}: {e}")
+                    
+                caps = self.get_printer_capabilities(printer_name)
 
-                        printers.append(
-                            {
-                                "id": printer_name,
-                                "name": printer_name,
-                                "status": status,
-                                "raw_status": status_str,
-                                "connection_type": connection_type,
-                                "device_uri": uri,
-                                "hardware_signature": hardware_signature,
-                                "supports_color": caps["supports_color"],
-                                "supports_duplex": caps["supports_duplex"],
-                            }
-                        )
+                printers.append(
+                    {
+                        "id": printer_name,
+                        "name": printer_name,
+                        "status": status,
+                        "raw_status": status_str,
+                        "connection_type": connection_type,
+                        "device_uri": uri,
+                        "hardware_signature": hardware_signature,
+                        "supports_color": caps["supports_color"],
+                        "supports_duplex": caps["supports_duplex"],
+                    }
+                )
             return printers
 
         except FileNotFoundError:
@@ -98,23 +119,22 @@ class UnixPrinterManager(BasePrinterManager):
         except subprocess.CalledProcessError as e:
             logger.error(f"Failed to query printers: {e.stderr}")
             return []
+        except Exception as e:
+            logger.error(f"Unexpected error querying printers: {e}")
+            return []
 
     def get_printer_capabilities(self, printer_name: str) -> Dict[str, bool]:
+        """Queries CUPS for printer capabilities (color, duplex)."""
         try:
-            result = subprocess.run(
-                ["lpoptions", "-p", printer_name, "-l"],
-                capture_output=True,
-                text=True,
-            )
-
+            result = self._run_cmd(["lpoptions", "-p", printer_name, "-l"], timeout=5)
             output = result.stdout.lower()
-
             return {
                 "supports_color": "color" in output,
                 "supports_duplex": "duplex" in output,
             }
 
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to fetch capabilities for {printer_name}: {e}")
             return {
                 "supports_color": False,
                 "supports_duplex": False,
@@ -126,35 +146,43 @@ class UnixPrinterManager(BasePrinterManager):
         on_success: Optional[Callable[[], None]],
         on_failure: Optional[Callable[[str], None]],
         timeout: int = 300,
-    ) -> bool:
+    ) -> None:
         """
-        Runs invisibly in the background. Executes callbacks based on hardware states.
+        Background thread: polls CUPS until the job finishes, errors out, or times out.
         """
+
         start_time = time.time()
         while time.time() - start_time < timeout:
-            # Check if job is still in the queue
-            result = subprocess.run(
-                ["lpstat", "-W", "completed"],
-                capture_output=True,
-                text=True,
-            )
+            try:
+                # Check if job is still in the queue
+                result = self._run_cmd(["lpstat", "-W", "completed"], timeout=5)
+                if os_job_id in result.stdout.lower():
+                    logger.info(f"Job {os_job_id} completed successfully.")
+                    if on_success:
+                        on_success()
+                    return 
 
-            if os_job_id in result.stdout.lower():
-                logger.info(f"Job {os_job_id} finished printing successfully.")
-                if on_success:
-                    on_success()
-                return True
-
-            # Check for errors/jams in the active queue
-            active = subprocess.run(["lpstat", "-p"], capture_output=True, text=True)
-            if (
-                "out of paper" in active.stdout.lower()
-                or "jam" in active.stdout.lower()
-            ):
-                logger.warning(
-                    f"Printer attention required for {os_job_id} (Jam/Empty). Waiting for resolution..."
-                )
-                return False
+                # Check for errors/jams in the active queue
+                active = self._run_cmd(["lpstat", "-p"], timeout=5)
+                if (
+                    "out of paper" in active.stdout.lower()
+                    or "jam" in active.stdout.lower()
+                ):
+                    logger.warning(
+                        f"Printer attention required for {os_job_id} (Jam/Empty). Waiting for resolution..."
+                    )
+                    time.sleep(5)
+                    continue 
+                
+                # Check if job left the queue without errors
+                active_jobs = self._run_cmd(["lpstat"], timeout=5)
+                if os_job_id not in active_jobs.stdout:
+                    logger.info(f"CUPS job {os_job_id} left the queue. Assuming success.")
+                    if on_success:
+                        on_success()
+                    return
+            except Exception as e:
+                logger.debug(f"CUPS poll error (transient): {e}")
 
             time.sleep(2)  # Poll every 2 seconds
 
@@ -162,7 +190,6 @@ class UnixPrinterManager(BasePrinterManager):
         logger.error(error_msg)
         if on_failure:
             on_failure(error_msg)
-        return False  # Timeout
 
     def print_file_async(
         self,
@@ -197,7 +224,7 @@ class UnixPrinterManager(BasePrinterManager):
 
             logger.debug(f"Executing print command: {' '.join(cmd)}")
 
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            result = self._run_cmd(cmd, timeout=30, check=True)
 
             # lp output usually looks like: "request id is HP_LaserJet-123 (1 file(s))"
             output = result.stdout.strip()
@@ -213,21 +240,30 @@ class UnixPrinterManager(BasePrinterManager):
                     target=self.wait_for_job_completion,
                     args=(os_job_id, on_success, on_failure),
                     daemon=True,
+                    name=f"CUPSMonitor-{os_job_id}",
+
                 )
                 monitor_thread.start()
 
                 return os_job_id
 
-            error_msg = f"Job failed to complete in OS queue (Timeout or Jam)."
+            error_msg = f"Job failed to complete in OS queue (Timeout or Jam). Unexpected lp output: {output}"
+            logger.error(error_msg)
 
             if on_failure:
-                logger.error(error_msg)
+                on_failure(error_msg)
             return None
 
         except subprocess.CalledProcessError as e:
             error_msg = f"OS failed to print file {file_path} to {printer_name}. Error: {e.stderr}"
             logger.error(error_msg)
             # Instantly trigger the failure callback if the command aborts
+            if on_failure:
+                on_failure(error_msg)
+            return None
+        except Exception as e:
+            error_msg = f"Unexpected error printing to {printer_name}: {e}"
+            logger.error(error_msg)
             if on_failure:
                 on_failure(error_msg)
             return None
@@ -239,9 +275,8 @@ class UnixPrinterManager(BasePrinterManager):
         """
         try:
             # 'cancel -a <printer>' clears all jobs for that destination
-            subprocess.run(
-                ["cancel", "-a", printer_name], check=True, capture_output=True
-            )
+            self._run_cmd(["cancel", "-a", printer_name], timeout=10, check=True)
+
             logger.info(f"Successfully cleared print queue for {printer_name}.")
             return True
         except subprocess.CalledProcessError as e:
@@ -250,3 +285,7 @@ class UnixPrinterManager(BasePrinterManager):
                 f"Queue clear skipped or failed for {printer_name} (Queue might already be empty)."
             )
             return False
+        except Exception as e:
+            logger.error(f"Error clearing queue for {printer_name}: {e}")
+            return False
+

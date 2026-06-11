@@ -2,7 +2,6 @@ import os
 import time
 import logging
 
-# Adjust the import path based on your exact package structure
 from app.core.config import config
 
 logger = logging.getLogger(__name__)
@@ -52,10 +51,10 @@ class StartupService:
                 try:
                     # exist_ok=True prevents errors if the directory already exists
                     # parents=True creates any intermediate directories that might be missing
-                        directory.mkdir(parents=True, exist_ok=True)
-                        logger.debug(f"Created missing directory: {directory}")
-                        if os.name != 'nt':
-                            os.chmod(str(directory), 0o750)
+                    directory.mkdir(parents=True, exist_ok=True)
+                    logger.debug(f"Created missing directory: {directory}")
+                    if os.name != 'nt':
+                        os.chmod(str(directory), 0o750)
                 except PermissionError:
                     logger.error(f"Permission denied: Cannot create directory at {directory}. "
                                 f"Check your user privileges.")
@@ -110,7 +109,7 @@ class StartupService:
             except Exception as e:
                 logger.debug(f"Could not inspect lock file {lock_file}: {e}")
 
-        if cleaned > 0:
+        if cleaned:
             logger.info(f"Startup cleanup: removed {cleaned} stale lock file(s).")
         else:
             logger.debug("Startup cleanup: no stale lock files found.")

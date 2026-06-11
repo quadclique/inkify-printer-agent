@@ -77,6 +77,8 @@ cover/
 Thumbs.db
 
 # Printer Agent Specific
+config/inkify-agent.yaml
+config/inkify-printers.yaml
 config/local_*.json
 config/*.secret.json
 config/
@@ -187,6 +189,13 @@ celerybeat.pid
 /site
 
 # mypy
+
+# IDE
+.idea/
+.vscode/
+.ruff_cache/
+
+# Type checkers
 .mypy_cache/
 .dmypy.json
 dmypy.json
@@ -224,6 +233,16 @@ Abstra
 .ruff_cache/
 
 # PyPI configuration file
+# Misc tooling
+.pdm-python
+.pdm-build/
+.pixi
+__pypackages__/
+.ropeproject
+.spyderproject
+.spyproject
+celerybeat-schedule
+celerybeat.pid
 .pypirc
 
 Cursor

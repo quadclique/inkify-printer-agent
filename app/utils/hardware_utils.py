@@ -55,13 +55,13 @@ def _get_linux_hw_id() -> str:
 
     # 2. /etc/machine-id — systemd stable ID (present on all modern Linux distros)
     try:
-        machine_id_path = "/etc/machine-id"
-        if os.path.exists(machine_id_path):
-            with open(machine_id_path, "r") as f:
-                machine_id = f.read().strip()
-            if machine_id and len(machine_id) >= 16:
-                logger.debug(f"Using /etc/machine-id as hardware ID: {machine_id[:8]}...")
-                return machine_id
+        for machine_id_path in ["/etc/machine-id", "/var/lib/dbus/machine-id"]:
+            if os.path.exists(machine_id_path):
+                with open(machine_id_path, "r") as f:
+                    machine_id = f.read().strip()
+                if machine_id and len(machine_id) >= 16:
+                    logger.debug(f"Using /etc/machine-id as hardware ID: {machine_id[:8]}...")
+                    return machine_id
     except Exception as e:
         logger.debug(f"Could not read /etc/machine-id: {e}")
 
@@ -87,9 +87,6 @@ def _get_windows_uuid() -> str:
     try:
         # Runs a silent command line query
         output = subprocess.check_output("wmic csproduct get uuid", shell=True, text=True)
-        # Output looks like:
-        # UUID
-        # 12345678-1234-1234-1234-1234567890AB
         lines = output.strip().split("\n")
         if len(lines) > 1:
             return lines[1].strip()
@@ -102,12 +99,11 @@ def _get_mac_uuid() -> str:
     """Uses Apple's system_profiler to extract the Hardware UUID."""
     try:
         output = subprocess.check_output(
-            "/usr/sbin/system_profiler SPHardwareDataType", shell=True, text=True
+            ["/usr/sbin/system_profiler, SPHardwareDataType"], shell=True, text=True
         )
         for line in output.split("\n"):
             if "Hardware UUID" in line:
-                # Looks like: "      Hardware UUID: 12345678-1234-1234-1234-1234567890AB"
-                return line.split(":")[1].strip()
+                return line.split(":",1)[1].strip()
     except Exception as e:
         logger.debug(f"Failed to read Mac UUID: {e}")
     

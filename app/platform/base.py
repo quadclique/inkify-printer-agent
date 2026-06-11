@@ -8,8 +8,9 @@ class BasePrinterManager(abc.ABC):
     def get_printers(self) -> List[Dict[str, str]]:
         """
         Returns a list of available printers and their statuses.
-        Must include: 'name', 'status', 'connection_type' (usb|network|unknown), 
-        and 'hardware_signature' (a unique string to identify the physical device).
+        Must include: 'id', 'name', 'status', 'raw_status',
+        'connection_type' (usb|network|unknown), 'device_uri',
+        'hardware_signature', 'supports_color', 'supports_duplex'.
         """
         pass
 
@@ -29,7 +30,10 @@ class BasePrinterManager(abc.ABC):
         on_success: Optional[Callable[[], None]] = None,
         on_failure: Optional[Callable[[str], None]] = None,
     ) -> Optional[str]:
-        """Dispatches a print job and monitors its completion."""
+        """
+        Dispatches a print job and monitors its completion asynchronously.
+        Returns the OS-level Job ID if dispatched successfully, else None.
+        """
         pass
 
     @abc.abstractmethod

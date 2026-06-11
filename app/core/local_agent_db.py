@@ -35,6 +35,9 @@ class LocalAgentDB:
             )
             # Returns dictionary-like rows instead of tuples
             conn.row_factory = sqlite3.Row
+            # Enable WAL mode for better concurrent read/write performance
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA foreign_keys=ON")
             yield conn
         except sqlite3.Error as e:
             logger.error(f"Database connection error: {e}")
@@ -51,7 +54,6 @@ class LocalAgentDB:
         """
         logger.info("Verifying local database schema...")
 
-        # Example schema: You can expand these as you build your models
         create_jobs_table_sql = """
         CREATE TABLE IF NOT EXISTS jobs (
             job_id TEXT PRIMARY KEY,
@@ -73,12 +75,24 @@ class LocalAgentDB:
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """
+        
+        queue_event_index_sql = """
+        CREATE INDEX IF NOT EXISTS idx_queue_unsynced
+            ON queue_events (synced, created_at);
+        """
 
+        jobs_status_index_sql = """
+        CREATE INDEX IF NOT EXISTS idx_jobs_status
+            ON jobs (status);
+        """
+        
         try:
             with cls.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(create_jobs_table_sql)
                 cursor.execute(create_queue_table_sql)
+                cursor.execute(queue_event_index_sql)
+                cursor.execute(jobs_status_index_sql)
                 conn.commit()
             logger.info("Local database schema initialized successfully.")
         except sqlite3.Error as e:

@@ -2,10 +2,12 @@ import sys
 import time
 import logging
 import threading
-from typing import Optional
+
 from app.core.config import config
 from app.repositories.agent_repo import AgentRepository
 from app.repositories.printer_repo import PrinterRepository
+from app.repositories.job_repo import JobRepository
+from app.repositories.queue_repo import QueueRepository
 
 from app.services.api_client_service import APIClientService
 from app.services.job_service import JobService
@@ -17,6 +19,8 @@ from app.services.printer_service import PrinterService
 from app.services.storage_service import StorageService
 from app.services.heartbeat_service import HeartbeatService
 from app.services.discovery_service import DiscoveryService
+from app.services.qr_scanner_service import QRScannerService
+
 
 from app.platform.factory import get_printer_manager
 
@@ -26,24 +30,34 @@ logger = logging.getLogger(__name__)
 class PrinterAgent:
 
     def __init__(self):
-        # Initialize Shared Base Services
+        # Initialize Repositories
         self.agent_repo = AgentRepository()
         self.printer_repo = PrinterRepository()
+        self.job_repo = JobRepository()
+        self.queue_repo = QueueRepository()
+        
+        # Initialize Shared Base Services
         self.api_client = APIClientService(self.agent_repo)
-        # self.cups_manager = CUPSManager()
         self.printer_manager = get_printer_manager()
         self.storage_service = StorageService()
 
         # Inject the shared API Client
-        self.queue_service = QueueService(self.api_client, self.storage_service)
+        self.queue_service = QueueService(self.api_client, self.storage_service, self.queue_repo)
         self.pairing_service = PairingService(self.api_client, self.agent_repo)
-        self.printer_service = PrinterService(self.api_client,self.printer_manager,self.printer_repo, self.storage_service)
+        self.printer_service = PrinterService(self.api_client, self.printer_manager, self.printer_repo, self.storage_service)
         self.heartbeat_service = HeartbeatService(self.api_client, self.printer_service)
         self.discovery_service = DiscoveryService(
             on_change=self.printer_service.check_for_hardware_changes
         )
-        self.job_service = JobService(self.api_client, self.printer_service, self.storage_service,self.queue_service)
-        
+        self.job_service = JobService(
+            self.api_client, 
+            self.printer_service, 
+            self.storage_service,
+            self.queue_service,
+            self.job_repo
+        )
+        self.qr_scanner_service = QRScannerService(self.api_client)
+
         self.cleanup_service = CleanupService(retention_days=7)
         self.updater_service = UpdaterService(self.api_client)
         
@@ -74,6 +88,8 @@ class PrinterAgent:
         self.is_running = True
         logger.info(
             f"Agent successfully authenticated. Polling for jobs every {config.JOB_POLL_INTERVAL} seconds."
+            f"Max backoff: {config.MAX_JOB_POLL_INTERVAL} seconds."
+
         )
 
         # Resolve any jobs interrupted by a crash/power-outage
@@ -131,10 +147,13 @@ class PrinterAgent:
                 # 5. Wait for the configured interval before checking again
                 self.stop_event.wait(current_poll_interval)
             except Exception as e:
-                logger.error(f"Unexpected error during job polling cycle: {e}")
-                self.stop_event.wait(5)
+                logger.error(f"Unexpected error during job polling cycle: {e}", exc_info=True)
+                self.stop_event.wait(config.ERROR_SLEEP_SECONDS)
+    
     def stop(self) -> None:
         """Halts the agent and cleans up resources."""
+        if not self.is_running:
+            return
         logger.info("Initiating graceful shutdown...")
         self.stop_event.set()
         self.is_running = False

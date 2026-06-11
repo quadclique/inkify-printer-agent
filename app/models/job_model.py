@@ -25,8 +25,12 @@ class JobModel:
             printer_id=data.get("printer_id", ""),
             status=data.get("status", "downloading"),
             document_id=data.get("document_id"),
-            copies=data.get("copies", 1),
-            is_color=data.get("is_color", False),
+            copies=max(1, int(data.get("copies", 1))),
+            is_color=bool(data.get("is_color", False)),
             file_url=data.get("file_url"),
             expected_hash=data.get("sha256_hash"),
         )
+
+    def is_valid(self) -> bool:
+        """Returns True if the job has all required fields."""
+        return bool(self.job_id and self.printer_id)

@@ -9,6 +9,7 @@ on:
 env:
   AWS_REGION: ap-south-1
   S3_BUCKET: inkify-installers
+  API_URL: ${{ vars.API_URL }}
 
 jobs:
   build:

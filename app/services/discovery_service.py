@@ -3,10 +3,7 @@ import time
 import logging
 import platform
 import threading
-from typing import Callable, Optional
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
-
+from typing import Callable, List
 
 from app.core.config import config
 
@@ -19,15 +16,8 @@ class DiscoveryService:
     triggers a cloud sync — replacing slow interval polling with instant detection.
 
     Strategy per OS:
-      - macOS / Linux: Two-pronged approach:
-          1. Filesystem watcher on CUPS socket directory (/run/cups, /var/run/cups)
-             via the `watchdog` library to catch queue add/remove events.
-          2. A periodic fallback poll every PRINTER_SYNC_INTERVAL seconds, ensuring
-             we never miss an event even if watchdog is unavailable.
-      - Windows: WMI async subscription to Win32_PrinterChangeInfo using pywin32.
-          Falls back to interval polling if pywin32 is not available.
-
-    Both paths call the same `on_change` callback (printer_service.check_for_hardware_changes).
+      - macOS/Linux: watchdog on CUPS socket directory + periodic fallback poll.
+      - Windows: WMI async subscription to Win32_Printer + periodic fallback poll.
     """
 
     def __init__(self, on_change: Callable[[], None]):
@@ -38,18 +28,18 @@ class DiscoveryService:
         """
         self.on_change = on_change
         self._stop_event = threading.Event()
-        self._threads: list[threading.Thread] = []
+        self._threads: List[threading.Thread] = []
         self._system = platform.system().lower()
 
         # Debounce: avoid rapid re-syncs when multiple events fire at once
-        # (e.g., USB enumeration fires multiple udev events in quick succession)
         self._last_trigger_time: float = 0.0
         self._debounce_seconds: float = 3.0
+        self._trigger_lock = threading.Lock()
 
     # Public Interface
     def start(self) -> None:
-        """Spawns OS-specific watcher threads and the fallback poll thread."""
-        logger.info("DiscoveryService starting...")
+        """Spawns OS-specific watcher threads plus the fallback poll thread."""
+        logger.info(f"DiscoveryService starting on {self._system}...")
         self._stop_event.clear()
 
         if self._system in ("darwin", "linux"):
@@ -75,7 +65,14 @@ class DiscoveryService:
         logger.info("DiscoveryService stopping...")
         self._stop_event.set()
         for t in self._threads:
-            t.join(timeout=5)
+            if not isinstance(t, threading.Thread) and hasattr(t, "stop"):
+                try:
+                    t.stop()
+                except Exception:
+                    pass
+            # Join actual Thread instances so we wait for their shutdown.
+            if isinstance(t, threading.Thread):
+                t.join(timeout=5)
         self._threads.clear()
         logger.debug("DiscoveryService stopped.")
 
@@ -84,12 +81,13 @@ class DiscoveryService:
         """
         Fires the on_change callback with debounce protection.
         Multiple rapid events (USB enumeration) are collapsed into one sync.
-        """
-        now = time.time()
-        if now - self._last_trigger_time < self._debounce_seconds:
-            logger.debug(f"DiscoveryService: debounced event ({reason})")
-            return
-        self._last_trigger_time = now
+        """        
+        with self._trigger_lock:
+            now = time.time()
+            if now - self._last_trigger_time < self._debounce_seconds:
+                logger.debug(f"DiscoveryService: debounced event ({reason})")
+                return
+            self._last_trigger_time = now
         logger.info(f"DiscoveryService: hardware change detected ({reason}). Triggering sync...")
         try:
             self.on_change()
@@ -114,7 +112,8 @@ class DiscoveryService:
         we trigger an immediate sync.
         """
         try:
-
+            from watchdog.observers import Observer
+            from watchdog.events import FileSystemEventHandler
             # Directories that change when a CUPS printer queue is added/removed
             cups_dirs = self._get_cups_watch_dirs()
 
@@ -126,7 +125,7 @@ class DiscoveryService:
                     # Filter to relevant file types only (CUPS socket/printer files)
                     src = getattr(event, "src_path", "")
                     if self._is_relevant_cups_event(src):
-                        self_inner._trigger_fn(f"CUPS filesystem event: {src}")
+                        self_inner._trigger_fn(f"CUPS fs event: {src}")
 
             observer = Observer()
             watched_any = False
@@ -153,8 +152,8 @@ class DiscoveryService:
 
         except ImportError:
             logger.warning(
-                "DiscoveryService: `watchdog` library not installed. "
-                "Install it for instant printer detection. Falling back to interval poll."
+                "DiscoveryService: 'watchdog' not installed. falling back to interval poll. "
+                "Install it with: pip install watchdog"
             )
         except Exception as e:
             logger.error(f"DiscoveryService: Failed to start watchdog observer: {e}")
@@ -221,10 +220,11 @@ class DiscoveryService:
                     # NextEvent with a 2000ms timeout so we can check stop_event
                     event = watcher.NextEvent(2000)
                     if event:
-                        self._trigger("WMI Win32_Printer change event")
-                except Exception:
-                    # Timeout or transient COM error — loop again
-                    pass
+                        self._trigger("WMI Win32_Printer change")
+                except pythoncom.com_error:
+                    pass  # Expected COM timeout when no event occurs within 2000ms
+                except Exception as e:
+                    logger.debug(f"Transient WMI event error: {e}")
 
         except ImportError:
             logger.warning(
