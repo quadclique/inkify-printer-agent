@@ -89,7 +89,7 @@ class TestFallbackPoll:
         svc, cb = _make_svc()
         # Patch PRINTER_SYNC_INTERVAL to a very short value
         with patch.object(cfg_module.config, "PRINTER_SYNC_INTERVAL", 0.05):
-            thread = threading.Thread(target=svc._fallback_poll, daemon=True)
+            thread = threading.Thread(target=svc._run_fallback_poll, daemon=True)
             thread.start()
             time.sleep(0.15)
             svc._stop_event.set()
@@ -100,7 +100,7 @@ class TestFallbackPoll:
         svc, cb = _make_svc()
         svc._stop_event.set()   # stop immediately
         with patch.object(cfg_module.config, "PRINTER_SYNC_INTERVAL", 0.01):
-            svc._fallback_poll()   # must return without hanging
+            svc._run_fallback_poll()   # must return without hanging
         cb.assert_not_called()
 
 
@@ -157,7 +157,7 @@ class TestWindowsWatcher:
             return real_import(name, *args, **kwargs)
 
         with patch("builtins.__import__", side_effect=mock_import):
-            svc._windows_wmi_loop()   # must not raise
+            svc._run_windows_wmi_watcher()   # must not raise
 
     def test_windows_wmi_loop_stops_on_stop_event(self):
         svc, _ = _make_svc()
@@ -178,4 +178,4 @@ class TestWindowsWatcher:
             "win32com.client": mock_wmi_client,
             "pythoncom": mock_pythoncom,
         }):
-            svc._windows_wmi_loop()   # must return quickly since stop_event is set
+            svc._run_windows_wmi_watcher()   # must return quickly since stop_event is set

@@ -118,21 +118,22 @@ class DiscoveryService:
             cups_dirs = self._get_cups_watch_dirs()
 
             class _CUPSEventHandler(FileSystemEventHandler):
-                def __init__(self_inner, trigger_fn):
-                    self_inner._trigger_fn = trigger_fn
+                def __init__(self, trigger_fn, discovery_svc):
+                    self._trigger_fn = trigger_fn
+                    self._discovery_svc = discovery_svc
 
-                def on_any_event(self_inner, event):
+                def on_any_event(self, event):
                     # Filter to relevant file types only (CUPS socket/printer files)
                     src = getattr(event, "src_path", "")
-                    if self._is_relevant_cups_event(src):
-                        self_inner._trigger_fn(f"CUPS fs event: {src}")
+                    if self._discovery_svc._is_relevant_cups_event(src):
+                        self._trigger_fn(f"CUPS fs event: {src}")
 
             observer = Observer()
             watched_any = False
             for cups_dir in cups_dirs:
                 if os.path.isdir(cups_dir):
                     observer.schedule(
-                        _CUPSEventHandler(self._trigger),
+                        _CUPSEventHandler(self._trigger, self),
                         path=cups_dir,
                         recursive=False,
                     )

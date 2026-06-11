@@ -12,7 +12,7 @@
 [Setup]
 ; --- Basic App Info ---
 AppName=Inkify Agent
-AppVersion={#GetFileVersion('..\dist\inkify-agent.exe')}
+AppVersion=1.0.0
 AppPublisher=Inkify Technologies
 AppPublisherURL=https://inkify.in
 AppSupportURL=https://support.inkify.in

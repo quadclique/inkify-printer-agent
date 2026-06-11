@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from app.core import config as cfg_module
-from app.services.startup_service import StartupService, _REQUIRED_DIRS
+from app.services.startup_service import StartupService
 
 
 # ensure_directories
@@ -35,7 +35,25 @@ class TestEnsureDirectories:
 
     def test_all_required_dirs_present_after_call(self):
         StartupService.ensure_directories()
-        for d in _REQUIRED_DIRS:
+        required_dirs = [
+            cfg_module.config.RUNTIME_DIR,
+            cfg_module.config.LOG_DIR,
+            cfg_module.config.CONFIG_DIR,
+            cfg_module.config.QUEUE_DIR,
+            cfg_module.config.JOB_DIR,
+            cfg_module.config.DB_DIR,
+            cfg_module.config.LOCK_DIR,
+            cfg_module.config.JOB_DOWNLOAD_DIR,
+            cfg_module.config.JOB_READY_DIR,
+            cfg_module.config.JOB_PRINTING_DIR,
+            cfg_module.config.JOB_COMPLETED_DIR,
+            cfg_module.config.JOB_FAILED_DIR,
+            cfg_module.config.QUEUE_PENDING_DIR,
+            cfg_module.config.QUEUE_PROCESSING_DIR,
+            cfg_module.config.QUEUE_COMPLETED_DIR,
+            cfg_module.config.QUEUE_FAILED_DIR,
+        ]
+        for d in required_dirs:
             assert d.exists(), f"Missing required directory: {d}"
 
     def test_sets_restrictive_permissions_on_unix(self):

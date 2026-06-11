@@ -20,7 +20,7 @@ from app.platform.factory import get_printer_manager
 class TestBasePrinterManager:
     def test_cannot_instantiate_directly(self):
         with pytest.raises(TypeError):
-            BasePrinterManager()
+            BasePrinterManager() # type: ignore
 
     def test_concrete_subclass_must_implement_all_methods(self):
         class Incomplete(BasePrinterManager):
@@ -28,7 +28,7 @@ class TestBasePrinterManager:
             # Missing the other three methods
 
         with pytest.raises(TypeError):
-            Incomplete()
+            Incomplete() # type: ignore
 
     def test_full_concrete_subclass_instantiates(self):
         class Full(BasePrinterManager):

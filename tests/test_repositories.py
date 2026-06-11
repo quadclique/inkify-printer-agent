@@ -110,14 +110,18 @@ class TestJobRepository:
         repo = JobRepository()
         repo.save(JobModel(job_id="j2", printer_id="p1", status="pending"))
         assert repo.update_status("j2", "printing") is True
-        assert repo.get_job("j2").status == "printing"
+        job_j2 = repo.get_job("j2")
+        assert job_j2 is not None
+        assert job_j2.status == "printing"
 
     def test_update_status_all_states(self, initialized_db):
         repo = JobRepository()
         repo.save(JobModel(job_id="j3", printer_id="p1", status="pending"))
         for status in ("downloading", "printing", "completed", "failed"):
             assert repo.update_status("j3", status) is True
-            assert repo.get_job("j3").status == status
+            job_j3 = repo.get_job("j3")
+            assert job_j3 is not None
+            assert job_j3.status == status
 
     def test_update_status_nonexistent_job(self, initialized_db):
         """Updating a non-existent job should return True (0 rows affected but no error)."""
@@ -127,7 +131,9 @@ class TestJobRepository:
         repo = JobRepository()
         repo.save(JobModel(job_id="j4", printer_id="p1", status="pending"))
         assert repo.update_file_path("j4", "/printing/j4.pdf") is True
-        assert repo.get_job("j4").file_path == "/printing/j4.pdf"
+        job_j4 = repo.get_job("j4")
+        assert job_j4 is not None
+        assert job_j4.file_path == "/printing/j4.pdf"
 
     def test_get_interrupted_jobs_returns_correct_statuses(self, initialized_db):
         repo = JobRepository()
@@ -258,12 +264,15 @@ class TestPrinterRepository:
         repo = PrinterRepository()
         repo.upsert_connection("SIG002", "network", "ipp://192.168.1.10", "HP_Net")
         repo.upsert_connection("SIG002", "usb", "usb://HP?serial=SIG002", "HP_USB")
-        assert repo.get_best_connection("SIG002")["transport"] == "usb"
+        best_sig002 = repo.get_best_connection("SIG002")
+        assert best_sig002 is not None
+        assert best_sig002["transport"] == "usb"
 
     def test_network_returned_when_no_usb(self):
         repo = PrinterRepository()
         repo.upsert_connection("SIG003", "network", "ipp://192.168.1.11", "HP_Net")
         best = repo.get_best_connection("SIG003")
+        assert best is not None
         assert best["transport"] == "network"
 
     def test_get_best_connection_unknown_signature_returns_none(self):
@@ -288,6 +297,7 @@ class TestPrinterRepository:
         repo.upsert_connection("SIG005", "usb", "usb://old", "OldQ")
         repo.upsert_connection("SIG005", "usb", "usb://new", "NewQ")
         best = repo.get_best_connection("SIG005")
+        assert best is not None
         assert best["device_uri"] == "usb://new"
         assert best["queue_name"] == "NewQ"
 

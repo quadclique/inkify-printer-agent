@@ -93,47 +93,44 @@ class TestRunPairingLoop:
         result = m._run_pairing_loop(agent, "tkn_good", pair_only=True)
         assert result is True
 
-    def test_returns_false_when_no_token_in_non_interactive(self):
+    def test_returns_false_when_no_token_pair_only_non_interactive(self):
+        """pair_only=True + no token + non-interactive stdin → False without calling ensure_paired."""
         import main as m; importlib.reload(m)
         agent = self._make_agent()
         with patch.object(sys.stdin, "isatty", return_value=False):
-            result = m._run_pairing_loop(agent, "", pair_only=False)
+            result = m._run_pairing_loop(agent, "", pair_only=True)
         assert result is False
+        agent.pairing_service.ensure_paired.assert_not_called()
 
-    def test_returns_false_in_pair_only_mode_on_failure(self):
-        import main as m; importlib.reload(m)
-        agent = MagicMock()
-        agent.pairing_service.ensure_paired.return_value = False
-        result = m._run_pairing_loop(agent, "tkn_bad", pair_only=True)
-        assert result is False
-
-    def test_returns_false_when_non_interactive_stdin_and_bad_token(self):
+    def test_returns_false_pair_only_non_interactive_on_failure(self):
+        """pair_only=True + non-interactive stdin + bad token → False after one attempt."""
         import main as m; importlib.reload(m)
         agent = MagicMock()
         agent.pairing_service.ensure_paired.return_value = False
         with patch.object(sys.stdin, "isatty", return_value=False):
-            result = m._run_pairing_loop(agent, "tkn_bad", pair_only=False)
+            result = m._run_pairing_loop(agent, "tkn_bad", pair_only=True)
         assert result is False
 
-    def test_returns_true_after_user_provides_new_token(self):
-        """First token fails; user types 'y' and provides a good token."""
-        import main as m; importlib.reload(m)
-        agent = self._make_agent(paired_on_call=2)   # succeeds on 2nd call
-        with patch.object(sys.stdin, "isatty", return_value=True), \
-             patch("builtins.input", side_effect=["y", "tkn_second_try"]):
-            result = m._run_pairing_loop(agent, "tkn_first_fail", pair_only=False)
-        assert result is True
-
-    def test_returns_false_when_user_declines_retry(self):
+    def test_returns_false_pair_only_on_failure_with_tty(self):
+        """pair_only=True + interactive + bad token → False (pair_only guard fires regardless of tty)."""
         import main as m; importlib.reload(m)
         agent = MagicMock()
         agent.pairing_service.ensure_paired.return_value = False
-        with patch.object(sys.stdin, "isatty", return_value=True), \
-             patch("builtins.input", return_value="n"):
-            result = m._run_pairing_loop(agent, "tkn_bad", pair_only=False)
+        with patch.object(sys.stdin, "isatty", return_value=True):
+            result = m._run_pairing_loop(agent, "tkn_bad", pair_only=True)
         assert result is False
 
+    def test_returns_true_after_user_provides_new_token(self):
+        """First token fails; loop re-prompts and succeeds on the second token."""
+        import main as m; importlib.reload(m)
+        agent = self._make_agent(paired_on_call=2)   # succeeds on 2nd call
+        with patch.object(sys.stdin, "isatty", return_value=True), \
+             patch("builtins.input", return_value="tkn_second_try"):
+            result = m._run_pairing_loop(agent, "tkn_first_fail", pair_only=False)
+        assert result is True
+
     def test_prompts_when_no_token_in_interactive_mode(self):
+        """No token + pair_only=False + interactive stdin → prompts user, succeeds."""
         import main as m; importlib.reload(m)
         agent = self._make_agent(paired_on_call=1)
         with patch.object(sys.stdin, "isatty", return_value=True), \
@@ -141,13 +138,14 @@ class TestRunPairingLoop:
             result = m._run_pairing_loop(agent, "", pair_only=False)
         assert result is True
 
-    def test_empty_interactive_input_exits(self):
+    def test_no_token_pair_only_interactive_still_prompts(self):
+        """pair_only=True + isatty=True + no token → still prompts (guard only fires on non-interactive)."""
         import main as m; importlib.reload(m)
-        agent = MagicMock()
+        agent = self._make_agent(paired_on_call=1)
         with patch.object(sys.stdin, "isatty", return_value=True), \
-             patch("builtins.input", return_value=""):
-            result = m._run_pairing_loop(agent, "", pair_only=False)
-        assert result is False
+             patch("builtins.input", return_value="tkn_prompted"):
+            result = m._run_pairing_loop(agent, "", pair_only=True)
+        assert result is True
 
 
 # Integration smoke test — main() argument parsing

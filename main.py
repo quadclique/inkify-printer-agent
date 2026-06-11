@@ -18,7 +18,7 @@ from app.core.local_agent_db import LocalAgentDB
 from app.agent_lifecycle import PrinterAgent
 from app.services.startup_service import StartupService
 
-def extract_token_from_filename() -> str:
+def _extract_token_from_filename() -> str:
     """Extracts token if the executable is named like 'InkifySetup--tkn_abc123.exe'"""
     try:
         filename = os.path.basename(sys.executable if getattr(sys, 'frozen', False) else sys.argv[0])
@@ -28,6 +28,39 @@ def extract_token_from_filename() -> str:
     except Exception as e:
         print(f"Failed to extract token from filename: {e}")
     return ""
+
+
+def _run_pairing_loop(agent, token: str, *, pair_only: bool) -> bool:
+    """
+    Drives the interactive/non-interactive pairing handshake.
+    Returns True if pairing succeeded, False otherwise.
+    """
+    while True:
+        if not token:
+            if pair_only and not sys.stdin.isatty():
+                print("Error: No valid setup token found and no interactive terminal available.", file=sys.stderr)
+                return False
+
+            print("\nNo valid setup token found.")
+            print("👉 Register or Login as Host. 👉 Go to the Inkify Dashboard 👉 Find Generate Token. 👉 Type or Copy-paste exact Token.")
+            token = input("Paste your 24-hour setup token here: ").strip()
+
+        print("\nAttempting to securely pair with Inkify Cloud...")
+        success = agent.pairing_service.ensure_paired(token)
+        
+        if success:
+            print("Agent successfully connected!")
+            return True
+        else:
+            print("Pairing failed. The token is invalid or has expired.")
+            token = ""  # Clear the variable so the loop asks the user
+            
+            if pair_only and not sys.stdin.isatty():
+                print("Error: Pairing failed and no interactive terminal available.", file=sys.stderr)
+                return False
+
+            if pair_only:
+                return False
 
 
 def main():
@@ -60,44 +93,26 @@ def main():
     # 4. Start the main agent loop
     agent = PrinterAgent()
     
-    # 1. Check if already permanently paired
-    agent_config = agent.agent_repo.get_config()
-    if agent_config and agent_config.agent_token:
+    # 5. Check if already permanently paired
+    if agent.pairing_service.is_paired():
         if not args.pair_only:
             agent.run()
         sys.exit(0)
         
-    # 2. Not paired. Look for the token in args or filename.
-    token = args.token or extract_token_from_filename()
-    
-    # 3. Prompt user if no token is found or if pairing fails (expired)
-    while True:
-        if not token:
-            if args.pair_only and not sys.stdin.isatty():
-                print("Error: No valid setup token found and no interactive terminal available.", file=sys.stderr)
-                sys.exit(1)
+    # 6. Not paired — determine token source
+    token = args.token or _extract_token_from_filename()
 
-            print("\nNo valid setup token found.")
-            print("👉 Register or Login as Host. 👉 Go to the Inkify Dashboard 👉 Find Generate Token. 👉 Type or Copy-paste exact Token.")
-            token = input("Paste your 24-hour setup token here: ").strip()
+    # 7. Drive the pairing loop
+    success = _run_pairing_loop(agent, token, pair_only=args.pair_only)
 
-        print("\nAttempting to securely pair with Inkify Cloud...")
-        success = agent.pairing_service.ensure_paired(token)
-        
-        if success:
-            print("Agent successfully connected!")
-            if args.pair_only:
-                sys.exit(0) # Exit so the installer can finish
-            print("Pairing complete! The background service will automatically start processing jobs.")
-            agent.run() # Start the main event loop
-            sys.exit(0)
-        else:
-            print("Pairing failed. The token is invalid or has expired.")
-            token = None # Clear the variable so the loop asks the user
-            
-            if args.pair_only and not sys.stdin.isatty():
-                print("Error: Pairing failed and no interactive terminal available.", file=sys.stderr)
-                sys.exit(1)
+    if success:
+        if args.pair_only:
+            sys.exit(0) # Exit so the installer can finish
+        print("Pairing complete! The background service will automatically start processing jobs.")
+        agent.run() # Start the main event loop
+        sys.exit(0)
+    else:
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

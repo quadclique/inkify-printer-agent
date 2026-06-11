@@ -131,12 +131,12 @@ jobs:
         run: |
           # If the tag contains '-beta' (e.g., v1.1.0-beta)
           if [[ "${{ github.ref }}" == *-beta* ]]; then
-            echo "S3_PREFIX=beta/" >> $GITHUB_ENV
-            echo "IS_PRERELEASE=true" >> $GITHUB_ENV
+            echo "S3_PREFIX=beta/" >> $GITHUB_OUTPUT
+            echo "IS_PRERELEASE=true" >> $GITHUB_OUTPUT
           # If it is a stable production tag (e.g., v1.1.0)
           else
-            echo "S3_PREFIX=releases/" >> $GITHUB_ENV
-            echo "IS_PRERELEASE=false" >> $GITHUB_ENV
+            echo "S3_PREFIX=releases/" >> $GITHUB_OUTPUT
+            echo "IS_PRERELEASE=false" >> $GITHUB_OUTPUT
           fi
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
@@ -150,19 +150,19 @@ jobs:
         shell: bash
         run: |
           # Upload Windows Installer to S3 
-          aws s3 cp final-release-files/InkifySetup/InkifySetup.exe s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}windows/${{ github.ref_name }}/InkifySetup.exe
+          aws s3 cp final-release-files/InkifySetup/InkifySetup.exe s3://${{ env.S3_BUCKET }}/${{ steps.set-env.outputs.S3_PREFIX }}windows/${{ github.ref_name }}/InkifySetup.exe
           
           # Upload macOS Installer to S3 
-          aws s3 cp final-release-files/InkifyAgentPkg/*.pkg s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}mac/${{ github.ref_name }}/InkifyAgent.pkg      
+          aws s3 cp final-release-files/InkifyAgentPkg/*.pkg s3://${{ env.S3_BUCKET }}/${{ steps.set-env.outputs.S3_PREFIX }}mac/${{ github.ref_name }}/InkifyAgent.pkg      
           
           # Upload Linux Installer to S3 
-          aws s3 cp final-release-files/InkifyAgentDeb/*.deb s3://${{ env.S3_BUCKET }}/${{ env.S3_PREFIX }}linux/${{ github.ref_name }}/inkify-agent.deb
+          aws s3 cp final-release-files/InkifyAgentDeb/*.deb s3://${{ env.S3_BUCKET }}/${{ steps.set-env.outputs.S3_PREFIX }}linux/${{ github.ref_name }}/inkify-agent.deb
 
       # Create GitHub Release (CD - ONLY runs on Tags)
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           files: final-release-files/**/* # Grabs every file downloaded
-          prerelease: ${{ env.IS_PRERELEASE }}
+          prerelease: ${{ steps.set-env.outputs.IS_PRERELEASE }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

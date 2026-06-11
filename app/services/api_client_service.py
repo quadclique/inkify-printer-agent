@@ -1,6 +1,7 @@
 import logging
 import threading
 import requests
+from pathlib import Path
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from typing import Dict, Any, Optional, List
@@ -127,7 +128,7 @@ class APIClientService:
         max_retries=config.API_MAX_RETRIES,
         exceptions=(requests.exceptions.ConnectionError, requests.exceptions.Timeout, requests.exceptions.ChunkedEncodingError),
     )
-    def download_job_file(self, file_url: str, destination_path: str) -> bool:
+    def download_job_file(self, file_url: str, destination_path: Path) -> bool:
         """Downloads the actual print payload (PDF/image) to the local disk."""
         # Check if the backend gave us a full URL (like S3) or a relative path
         url = file_url if file_url.startswith("http") else f"{self.base_url}{file_url}"
@@ -148,7 +149,8 @@ class APIClientService:
             requests.exceptions.Timeout,
             requests.exceptions.ChunkedEncodingError,
         ) as e:
-            logger.warning(f"Network error during download from {url}: {e}. Retrying...")            raise
+            logger.warning(f"Network error during download from {url}: {e}. Retrying...")
+            raise
         except requests.exceptions.HTTPError as e:
             logger.error(f"HTTP error downloading file: {e.response.status_code}")
             return False

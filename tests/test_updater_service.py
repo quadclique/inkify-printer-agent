@@ -173,24 +173,24 @@ class TestTriggerUpdate:
         svc, mock_api = _make_svc()
         mock_api.download_job_file.return_value = True
         with patch("subprocess.Popen"), patch("sys.exit"):
-            svc._trigger_update("https://cdn.inkify.in/update.sh")
+            svc._trigger_update_script("https://cdn.inkify.in/update.sh")
         mock_api.download_job_file.assert_called_once()
 
     def test_exits_after_launching_script(self):
         svc, mock_api = _make_svc()
         mock_api.download_job_file.return_value = True
         with patch("subprocess.Popen"), patch("sys.exit") as mock_exit:
-            svc._trigger_update("https://cdn.inkify.in/update.sh")
+            svc._trigger_update_script("https://cdn.inkify.in/update.sh")
         mock_exit.assert_called_once_with(0)
 
     def test_does_not_exit_when_download_fails(self):
         svc, mock_api = _make_svc()
         mock_api.download_job_file.return_value = False
         with patch("sys.exit") as mock_exit:
-            svc._trigger_update("https://cdn.inkify.in/update.sh")
+            svc._trigger_update_script("https://cdn.inkify.in/update.sh")
         mock_exit.assert_not_called()
 
     def test_handles_exception_gracefully(self):
         svc, mock_api = _make_svc()
         mock_api.download_job_file.side_effect = Exception("disk full")
-        svc._trigger_update("https://cdn.inkify.in/update.sh")  # must not raise
+        svc._trigger_update_script("https://cdn.inkify.in/update.sh")  # must not raise

@@ -1,7 +1,7 @@
 """
 Tests for app.services.heartbeat_service.HeartbeatService covering:
   start / stop lifecycle
-  _build_payload
+  _build_heartbeat_payload
   _run (via integration)
 """
 import time
@@ -30,7 +30,7 @@ def _make_svc(api=None, printer_svc=None):
     }
 
     svc = HeartbeatService(mock_api, mock_printer)
-    svc.interval = 0.05   # Speed up tests: 50 ms between beats
+    svc.interval = 0.05  # type: ignore # Speed up tests: 50 ms between beats
     return svc, mock_api, mock_printer
 
 
@@ -80,40 +80,40 @@ class TestHeartbeatLifecycle:
         assert mock_api.check_in.call_count >= 1
 
 
-# _build_payload
+# _build_heartbeat_payload
 class TestBuildPayload:
     def test_payload_has_required_top_level_keys(self):
         svc, _, _ = _make_svc()
-        payload = svc._build_payload()
+        payload = svc._build_heartbeat_payload()
         for key in ("version", "status", "environment", "metrics", "printers"):
             assert key in payload, f"Missing key: {key}"
 
     def test_status_is_online(self):
         svc, _, _ = _make_svc()
-        assert svc._build_payload()["status"] == "online"
+        assert svc._build_heartbeat_payload()["status"] == "online"
 
     def test_environment_matches_config(self):
         svc, _, _ = _make_svc()
-        assert svc._build_payload()["environment"] == cfg_module.config.ENVIRONMENT
+        assert svc._build_heartbeat_payload()["environment"] == cfg_module.config.ENVIRONMENT
 
     def test_printers_is_list(self):
         svc, _, _ = _make_svc()
-        assert isinstance(svc._build_payload()["printers"], list)
+        assert isinstance(svc._build_heartbeat_payload()["printers"], list)
 
     def test_printers_list_contains_detected_printer(self):
         svc, _, _ = _make_svc()
-        printers = svc._build_payload()["printers"]
+        printers = svc._build_heartbeat_payload()["printers"]
         assert len(printers) == 1
         assert printers[0]["name"] == "HP_LaserJet"
 
     def test_printer_cloud_id_resolved(self):
         svc, _, _ = _make_svc()
-        printers = svc._build_payload()["printers"]
+        printers = svc._build_heartbeat_payload()["printers"]
         assert printers[0]["cloud_printer_id"] == "cloud-uuid-1"
 
     def test_printer_is_online_for_idle(self):
         svc, _, _ = _make_svc()
-        printers = svc._build_payload()["printers"]
+        printers = svc._build_heartbeat_payload()["printers"]
         assert printers[0]["is_online"] is True
 
     def test_printer_is_not_online_for_offline(self):
@@ -122,29 +122,29 @@ class TestBuildPayload:
             "id": "HP1", "name": "HP_LaserJet", "status": "offline",
             "connection_type": "usb", "hardware_signature": "SIG001",
         }]
-        printers = svc._build_payload()["printers"]
+        printers = svc._build_heartbeat_payload()["printers"]
         assert printers[0]["is_online"] is False
 
     def test_metrics_dict_present(self):
         svc, _, _ = _make_svc()
-        metrics = svc._build_payload()["metrics"]
+        metrics = svc._build_heartbeat_payload()["metrics"]
         assert isinstance(metrics, dict)
         assert "cpu_percent" in metrics
 
     def test_version_falls_back_to_config_when_no_file(self):
         svc, _, _ = _make_svc()
         # VERSION_FILE is patched to a non-existent path by isolate_config
-        payload = svc._build_payload()
+        payload = svc._build_heartbeat_payload()
         assert payload["version"] == cfg_module.config.APP_VERSION
 
     def test_version_reads_from_version_file(self):
         svc, _, _ = _make_svc()
         cfg_module.config.VERSION_FILE.write_text("2.5.0")
-        payload = svc._build_payload()
+        payload = svc._build_heartbeat_payload()
         assert payload["version"] == "2.5.0"
 
     def test_empty_printers_list_when_none_detected(self):
         svc, _, mock_printer = _make_svc()
         mock_printer.get_available_printers.return_value = []
-        payload = svc._build_payload()
+        payload = svc._build_heartbeat_payload()
         assert payload["printers"] == []

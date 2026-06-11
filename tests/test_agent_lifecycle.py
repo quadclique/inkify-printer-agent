@@ -40,22 +40,21 @@ def _make_agent():
         agent = PrinterAgent()
 
     # Wire up sensible mock defaults
-    agent.agent_repo.get_config.return_value = AgentModel(
+    agent.agent_repo.get_config.return_value = AgentModel( # type: ignore
         agent_id="test-agent", agent_token="test-token"
     )
-    agent.job_service.process_pending_jobs.return_value = 0
-    agent.queue_service.process_queue.return_value = None
-    agent.heartbeat_service.start.return_value = None
-    agent.heartbeat_service.stop.return_value = None
-    agent.discovery_service.start.return_value = None
-    agent.discovery_service.stop.return_value = None
-    agent.job_service.shutdown.return_value = None
-    agent.job_service.recover_interrupted_jobs.return_value = None
-    agent.printer_service.sync_printers_with_cloud.return_value = None
-    agent.cleanup_service.run_cleanup.return_value = None
-    agent.updater_service.check_for_updates.return_value = None
-    agent.updater_service.apply_update_if_ready.return_value = None
-
+    agent.job_service.process_pending_jobs.return_value = 0  # type: ignore
+    agent.queue_service.process_queue.return_value = None  # type: ignore
+    agent.heartbeat_service.start.return_value = None  # type: ignore
+    agent.heartbeat_service.stop.return_value = None  # type: ignore
+    agent.discovery_service.start.return_value = None  # type: ignore
+    agent.discovery_service.stop.return_value = None  # type: ignore
+    agent.job_service.shutdown.return_value = None  # type: ignore
+    agent.job_service.recover_interrupted_jobs.return_value = None  # type: ignore
+    agent.printer_service.sync_printers_with_cloud.return_value = None  # type: ignore
+    agent.cleanup_service.run_cleanup.return_value = None  # type: ignore
+    agent.updater_service.check_for_updates.return_value = None  # type: ignore
+    agent.updater_service.apply_update_if_ready.return_value = None  # type: ignore
     return agent
 
 
@@ -84,7 +83,7 @@ class TestPrinterAgentInit:
 class TestPrinterAgentRun:
     def test_exits_if_not_authenticated(self):
         agent = _make_agent()
-        agent.agent_repo.get_config.return_value = AgentModel()   # no token
+        agent.agent_repo.get_config.return_value = AgentModel() # type: ignore # no token
         with pytest.raises(SystemExit) as exc:
             agent.run()
         assert exc.value.code == 1
@@ -94,25 +93,25 @@ class TestPrinterAgentRun:
         # Make the loop exit after one iteration
         agent.stop_event.set()
         agent.run()
-        agent.printer_service.sync_printers_with_cloud.assert_called_once()
+        agent.printer_service.sync_printers_with_cloud.assert_called_once() # type: ignore
 
     def test_recovers_interrupted_jobs_on_startup(self):
         agent = _make_agent()
         agent.stop_event.set()
         agent.run()
-        agent.job_service.recover_interrupted_jobs.assert_called_once()
+        agent.job_service.recover_interrupted_jobs.assert_called_once() # type: ignore
 
     def test_starts_heartbeat_service(self):
         agent = _make_agent()
         agent.stop_event.set()
         agent.run()
-        agent.heartbeat_service.start.assert_called_once()
+        agent.heartbeat_service.start.assert_called_once() # type: ignore
 
     def test_starts_discovery_service(self):
         agent = _make_agent()
         agent.stop_event.set()
         agent.run()
-        agent.discovery_service.start.assert_called_once()
+        agent.discovery_service.start.assert_called_once() # type: ignore
 
     def test_sets_is_running_true(self):
         agent = _make_agent()
@@ -122,7 +121,7 @@ class TestPrinterAgentRun:
         # After stop_event is already set, stop() is called → is_running = False
         # Verify it was at least set to True at some point (stop sets it False)
         # We check that stop() was reached (stop_event was set before loop)
-        agent.heartbeat_service.stop.assert_called()
+        agent.heartbeat_service.stop.assert_called() # type: ignore
 
 
 # stop
@@ -143,25 +142,25 @@ class TestPrinterAgentStop:
         agent = _make_agent()
         agent.is_running = True
         agent.stop()
-        agent.heartbeat_service.stop.assert_called_once()
+        agent.heartbeat_service.stop.assert_called_once() # type: ignore
 
     def test_stop_calls_discovery_stop(self):
         agent = _make_agent()
         agent.is_running = True
         agent.stop()
-        agent.discovery_service.stop.assert_called_once()
+        agent.discovery_service.stop.assert_called_once() # type: ignore
 
     def test_stop_calls_job_service_shutdown(self):
         agent = _make_agent()
         agent.is_running = True
         agent.stop()
-        agent.job_service.shutdown.assert_called_once()
+        agent.job_service.shutdown.assert_called_once() # type: ignore
 
     def test_stop_when_not_running_is_no_op(self):
         agent = _make_agent()
         agent.is_running = False
         agent.stop()   # must not raise and must not call shutdown
-        agent.job_service.shutdown.assert_not_called()
+        agent.job_service.shutdown.assert_not_called() # type: ignore
 
     def test_stop_idempotent(self):
         agent = _make_agent()
@@ -187,14 +186,14 @@ class TestPrinterAgentLoop:
                 agent.stop_event.set()
             return original_wait(0)  # return immediately
 
-        agent.stop_event.wait = patched_wait
+        agent.stop_event.wait = patched_wait # type: ignore
         agent._loop()
 
     def test_processes_queue_before_jobs(self):
         agent = _make_agent()
         order = []
-        agent.queue_service.process_queue.side_effect = lambda: order.append("queue")
-        agent.job_service.process_pending_jobs.side_effect = lambda: (
+        agent.queue_service.process_queue.side_effect = lambda: order.append("queue") # type: ignore
+        agent.job_service.process_pending_jobs.side_effect = lambda: ( # type: ignore
             order.append("jobs") or 0
         )
         self._run_one_iteration(agent)
@@ -203,7 +202,7 @@ class TestPrinterAgentLoop:
     def test_resets_interval_when_jobs_found(self):
         from app.core.config import config
         agent = _make_agent()
-        agent.job_service.process_pending_jobs.return_value = 2   # jobs found
+        agent.job_service.process_pending_jobs.return_value = 2  # type: ignore # jobs found
 
         # Capture the wait timeout used
         wait_timeouts = []
@@ -226,7 +225,7 @@ class TestPrinterAgentLoop:
     def test_increases_interval_when_idle(self):
         from app.core.config import config
         agent = _make_agent()
-        agent.job_service.process_pending_jobs.return_value = 0   # idle
+        agent.job_service.process_pending_jobs.return_value = 0 # type: ignore  # idle
 
         wait_timeouts = []
         calls = [0]
@@ -249,12 +248,12 @@ class TestPrinterAgentLoop:
     def test_calls_updater_check_for_updates(self):
         agent = _make_agent()
         self._run_one_iteration(agent)
-        agent.updater_service.check_for_updates.assert_called()
+        agent.updater_service.check_for_updates.assert_called() # type: ignore
 
     def test_calls_updater_apply_update_if_ready(self):
         agent = _make_agent()
         self._run_one_iteration(agent)
-        agent.updater_service.apply_update_if_ready.assert_called()
+        agent.updater_service.apply_update_if_ready.assert_called() # type: ignore
 
     def test_runs_cleanup_when_interval_exceeded(self):
         from app.core import config as cfg_module
@@ -263,13 +262,13 @@ class TestPrinterAgentLoop:
         agent.last_cleanup_time = 0
         with patch.object(cfg_module.config, "CLEANUP_INTERVAL_SECONDS", 0):
             self._run_one_iteration(agent)
-        agent.cleanup_service.run_cleanup.assert_called_once()
+        agent.cleanup_service.run_cleanup.assert_called_once() # type: ignore
 
     def test_does_not_run_cleanup_when_not_due(self):
         agent = _make_agent()
         agent.last_cleanup_time = time.time()   # just cleaned
         self._run_one_iteration(agent)
-        agent.cleanup_service.run_cleanup.assert_not_called()
+        agent.cleanup_service.run_cleanup.assert_not_called() # type: ignore
 
     def test_loop_recovers_from_exception_in_iteration(self):
         """An exception in one iteration must not terminate the loop."""
@@ -283,10 +282,10 @@ class TestPrinterAgentLoop:
             agent.stop_event.set()
             return 0
 
-        agent.job_service.process_pending_jobs.side_effect = boom
+        agent.job_service.process_pending_jobs.side_effect = boom # type: ignore
 
         original_wait = agent.stop_event.wait
-        agent.stop_event.wait = lambda t=None: original_wait(0)
+        agent.stop_event.wait = lambda t=None: original_wait(0) # type: ignore
 
         agent._loop()   # must not propagate the RuntimeError
         assert calls[0] >= 2   # loop continued after the error

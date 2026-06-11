@@ -23,12 +23,12 @@ from app.services.job_service import JobService
 
 
 # Helpers
-def _make_svc(initialized_db, api=None, printer_svc=None,
-              storage=None, queue=None):
+def _make_svc(initialized_db, api=None, printer_svc=None, storage=None, queue=None, job_repo=None):
     mock_api = api or MagicMock()
     mock_printer = printer_svc or MagicMock()
     mock_storage = storage or MagicMock()
     mock_queue = queue or MagicMock()
+    mock_job_repo = job_repo or MagicMock()
 
     # Sensible defaults
     mock_api.pull_next_job.return_value = {"status": "idle"}
@@ -41,7 +41,7 @@ def _make_svc(initialized_db, api=None, printer_svc=None,
     )
     mock_printer.dispatch_job.return_value = True
 
-    svc = JobService(mock_api, mock_printer, mock_storage, mock_queue)
+    svc = JobService(mock_api, mock_printer, mock_storage, mock_queue, mock_job_repo)
     return svc, mock_api, mock_printer, mock_storage, mock_queue
 
 
@@ -164,7 +164,7 @@ class TestRecoverInterruptedJobs:
 class TestJobServiceDBHelpers:
     def test_register_job_in_db(self, initialized_db):
         svc, *_ = _make_svc(initialized_db)
-        svc._register_job_in_db("j-reg", "p1")
+        svc.job_repo.register_job("j-reg", "p1")
         with LocalAgentDB.get_connection() as conn:
             row = conn.execute(
                 "SELECT * FROM jobs WHERE job_id='j-reg'"
@@ -175,13 +175,13 @@ class TestJobServiceDBHelpers:
     def test_register_job_idempotent(self, initialized_db):
         """INSERT OR IGNORE — calling twice must not raise."""
         svc, *_ = _make_svc(initialized_db)
-        svc._register_job_in_db("j-idem", "p1")
-        svc._register_job_in_db("j-idem", "p1")
+        svc.job_repo.register_job("j-idem", "p1")
+        svc.job_repo.register_job("j-idem", "p1")
 
     def test_update_db_status(self, initialized_db):
         svc, *_ = _make_svc(initialized_db)
-        svc._register_job_in_db("j-stat", "p1")
-        svc._update_db_status("j-stat", "printing")
+        svc.job_repo.register_job("j-stat", "p1")
+        svc.job_repo.update_job_status("j-stat", "printing")
         with LocalAgentDB.get_connection() as conn:
             row = conn.execute(
                 "SELECT status FROM jobs WHERE job_id='j-stat'"
@@ -190,8 +190,8 @@ class TestJobServiceDBHelpers:
 
     def test_update_db_filepath(self, initialized_db):
         svc, *_ = _make_svc(initialized_db)
-        svc._register_job_in_db("j-fp", "p1")
-        svc._update_db_filepath("j-fp", "/printing/j-fp.pdf")
+        svc.job_repo.register_job("j-fp", "p1")
+        svc.job_repo.update_db_filepath("j-fp", "/printing/j-fp.pdf")
         with LocalAgentDB.get_connection() as conn:
             row = conn.execute(
                 "SELECT file_path FROM jobs WHERE job_id='j-fp'"
@@ -203,8 +203,8 @@ class TestJobServiceDBHelpers:
 class TestFailJob:
     def test_marks_job_failed_in_db(self, initialized_db):
         svc, _, _, _, _ = _make_svc(initialized_db)
-        svc._register_job_in_db("j-fail", "p1")
-        svc._fail_job("j-fail", "Paper jam")
+        svc.job_repo.register_job("j-fail", "p1")
+        svc.job_repo.fail_job("j-fail", "Paper jam")
         with LocalAgentDB.get_connection() as conn:
             row = conn.execute(
                 "SELECT status FROM jobs WHERE job_id='j-fail'"
@@ -213,8 +213,8 @@ class TestFailJob:
 
     def test_calls_api_update_status_failed(self, initialized_db):
         svc, mock_api, _, _, _ = _make_svc(initialized_db)
-        svc._register_job_in_db("j-fail2", "p1")
-        svc._fail_job("j-fail2", "Out of paper")
+        svc.job_repo.register_job("j-fail2", "p1")
+        svc.job_repo.fail_job("j-fail2", "Out of paper")
         mock_api.update_job_status.assert_called_with(
             "j-fail2", "failed", details="Out of paper"
         )
@@ -222,8 +222,8 @@ class TestFailJob:
     def test_enqueues_event_when_api_fails(self, initialized_db):
         svc, mock_api, _, _, mock_queue = _make_svc(initialized_db)
         mock_api.update_job_status.return_value = False
-        svc._register_job_in_db("j-q", "p1")
-        svc._fail_job("j-q", "Network error")
+        svc.job_repo.register_job("j-q", "p1")
+        svc.job_repo.fail_job("j-q", "Network error")
         mock_queue.enqueue_event.assert_called_once_with(
             "j-q", "status_update",
             {"status": "failed", "details": "Network error"},
@@ -232,15 +232,15 @@ class TestFailJob:
     def test_enqueues_event_when_api_raises(self, initialized_db):
         svc, mock_api, _, _, mock_queue = _make_svc(initialized_db)
         mock_api.update_job_status.side_effect = Exception("timeout")
-        svc._register_job_in_db("j-exc", "p1")
-        svc._fail_job("j-exc", "Timeout")
+        svc.job_repo.register_job("j-exc", "p1")
+        svc.job_repo.fail_job("j-exc", "Timeout")
         mock_queue.enqueue_event.assert_called_once()
 
     def test_no_queue_event_when_api_succeeds(self, initialized_db):
         svc, mock_api, _, _, mock_queue = _make_svc(initialized_db)
         mock_api.update_job_status.return_value = True
-        svc._register_job_in_db("j-ok", "p1")
-        svc._fail_job("j-ok", "reason")
+        svc.job_repo.register_job("j-ok", "p1")
+        svc.job_repo.fail_job("j-ok", "reason")
         mock_queue.enqueue_event.assert_not_called()
 
 
@@ -248,8 +248,8 @@ class TestFailJob:
 class TestCompleteJob:
     def test_marks_job_completed_in_db(self, initialized_db):
         svc, _, _, _, _ = _make_svc(initialized_db)
-        svc._register_job_in_db("j-done", "p1")
-        svc._complete_job("j-done")
+        svc.job_repo.register_job("j-done", "p1")
+        svc.job_repo.complete_job("j-done")
         with LocalAgentDB.get_connection() as conn:
             row = conn.execute(
                 "SELECT status FROM jobs WHERE job_id='j-done'"
@@ -258,15 +258,15 @@ class TestCompleteJob:
 
     def test_calls_api_update_status_completed(self, initialized_db):
         svc, mock_api, _, _, _ = _make_svc(initialized_db)
-        svc._register_job_in_db("j-done2", "p1")
-        svc._complete_job("j-done2")
+        svc.job_repo.register_job("j-done2", "p1")
+        svc.job_repo.complete_job("j-done2")
         mock_api.update_job_status.assert_called_with("j-done2", "completed")
 
     def test_enqueues_event_when_api_fails(self, initialized_db):
         svc, mock_api, _, _, mock_queue = _make_svc(initialized_db)
         mock_api.update_job_status.return_value = False
-        svc._register_job_in_db("j-cq", "p1")
-        svc._complete_job("j-cq")
+        svc.job_repo.register_job("j-cq", "p1")
+        svc.job_repo.complete_job("j-cq")
         mock_queue.enqueue_event.assert_called_once_with(
             "j-cq", "status_update", {"status": "completed"}
         )
@@ -274,15 +274,15 @@ class TestCompleteJob:
     def test_enqueues_event_when_api_raises(self, initialized_db):
         svc, mock_api, _, _, mock_queue = _make_svc(initialized_db)
         mock_api.update_job_status.side_effect = Exception("network error")
-        svc._register_job_in_db("j-cexc", "p1")
-        svc._complete_job("j-cexc")
+        svc.job_repo.register_job("j-cexc", "p1")
+        svc.job_repo.complete_job("j-cexc")
         mock_queue.enqueue_event.assert_called_once()
 
     def test_no_queue_event_when_api_succeeds(self, initialized_db):
         svc, mock_api, _, _, mock_queue = _make_svc(initialized_db)
         mock_api.update_job_status.return_value = True
-        svc._register_job_in_db("j-cok", "p1")
-        svc._complete_job("j-cok")
+        svc.job_repo.register_job("j-cok", "p1")
+        svc.job_repo.complete_job("j-cok")
         mock_queue.enqueue_event.assert_not_called()
 
 
