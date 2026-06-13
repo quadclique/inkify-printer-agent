@@ -139,7 +139,7 @@ class PrinterService:
                 logger.info(f"New Printer discovered: {p['name']} (Sig: {signature}). Ready for secure handshake.")
 
             # Build all-transport connections for this signature
-            [connections, _] = self._build_connections_payload(local_printers, signature)
+            connections = self._build_connections_payload(local_printers, signature)
 
             payload.append(
                 {
@@ -237,12 +237,12 @@ class PrinterService:
         self.printer_repo.save_printer_map(updated_map)
         logger.info(f"Synced {len(updated_map)} printers. Multi-connection routing map updated.")
 
-    def _build_connections_payload(self, local_printers: list, signature: str) -> List[Dict]:
+    def _build_connections_payload(self, local_printers: list, signature: str) -> Dict[str, Dict]:
         """
-        Builds the connections array for a given hardware signature,
+        Builds the connections dict for a given hardware signature,
         collecting all transport variants detected for the same physical printer.
         """
-        connections = []
+        connections = {}
         seen_uris: set = set()
         for p in local_printers:
             if p["hardware_signature"] != signature:
@@ -251,11 +251,11 @@ class PrinterService:
             if uri in seen_uris:
                 continue
             seen_uris.add(uri)
-            connections.append({
-                "transport": p["connection_type"],
+            transport = p["connection_type"]
+            connections[transport] = {
                 "device_uri": uri,
                 "queue_name": p["name"],
-            })
+            }
         return connections
 
     def check_for_hardware_changes(self) -> None:

@@ -2,7 +2,8 @@
 ; Inkify Agent — Windows Installer (Inno Setup 6)
 ;
 ; Embedding a token in the filename:
-;   Rename the output exe to  InkifySetup--tkn_<token>.exe  before distributing.
+;   Rename the output exe to  InkifySetup--<token>.exe  before distributing.
+;   e.g.  InkifySetup--inkify_reg_VuX6U8or8VkJfnEk.exe
 ;   The installer will strip the token from the filename and use it for auto-pairing.
 ;
 ; Manual install (no embedded token):
@@ -73,11 +74,7 @@ begin
     Token := Copy(InstallerName, TokenStartPos + 2, Length(InstallerName));
     { Strip the .exe extension }
     Token := Copy(Token, 1, Pos(ExtractFileExt(InstallerName), Token) - 1);
-    { Basic validation: must start with tkn_ }
-    if Copy(Token, 1, 4) = 'tkn_' then
-      Result := Token
-    else
-      Result := '';
+    Result := Token
   end
   else
     Result := '';
