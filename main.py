@@ -19,10 +19,10 @@ from app.agent_lifecycle import PrinterAgent
 from app.services.startup_service import StartupService
 
 def _extract_token_from_filename() -> str:
-    """Extracts token if the executable is named like 'InkifySetup--tkn_abc123.exe'"""
+    """Extracts token if the executable is named like 'InkifySetup--inkify_reg_abc123.exe'"""
     try:
         filename = os.path.basename(sys.executable if getattr(sys, 'frozen', False) else sys.argv[0])
-        match = re.search(r'--(tkn_[a-zA-Z0-9]+)', filename)
+        match = re.search(r'--(inkify_reg_[a-zA-Z0-9_]+)', filename)
         if match:
             return match.group(1)
     except Exception as e:
@@ -68,9 +68,9 @@ def main():
         description="Inkify Printer Agent", 
         formatter_class=argparse.RawDescriptionHelpFormatter, 
         epilog=(
-            "  python main.py                          # Run (must already be paired)\n"
-            "  python main.py --token tkn_abc123       # Pair and run\n"
-            "  python main.py --token tkn_abc123 --pair-only  # Pair only (Used for Installers)\n"
+            "  python main.py                                            # Run (must already be paired)\n"
+            "  python main.py --token inkify_reg_abc123                  # Pair and run\n"
+            "  python main.py --token inkify_reg_abc123 --pair-only      # Pair only (Used for Installers)\n"
         )
     )
     parser.add_argument("--token", type=str, help="Pre-provisioned registration token from the dashboard")
