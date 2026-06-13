@@ -93,16 +93,18 @@ def main():
     # 4. Start the main agent loop
     agent = PrinterAgent()
     
-    # 5. Check if already permanently paired
-    if agent.pairing_service.is_paired():
+    # 5. Check if already permanently paired.
+    #    Exception: if an explicit --token is given with --pair-only, always
+    #    re-pair (covers repair / re-registration with a new token).
+    token = args.token or _extract_token_from_filename()
+    force_repair = bool(args.pair_only and token)
+
+    if agent.pairing_service.is_paired() and not force_repair:
         if not args.pair_only:
             agent.run()
         sys.exit(0)
-        
-    # 6. Not paired — determine token source
-    token = args.token or _extract_token_from_filename()
 
-    # 7. Drive the pairing loop
+    # 6. Drive the pairing loop
     success = _run_pairing_loop(agent, token, pair_only=args.pair_only)
 
     if success:
